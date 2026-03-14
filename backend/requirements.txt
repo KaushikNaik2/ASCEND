@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+pdfplumber
+langchain
+langchain-google-genai
+langchain-core
+python-dotenv
+pydantic
