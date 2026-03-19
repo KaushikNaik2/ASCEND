@@ -17,7 +17,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -36,3 +36,6 @@ coverage.xml
 # OS Files
 .DS_Store
 Thumbs.db
+
+
+!src/lib/
