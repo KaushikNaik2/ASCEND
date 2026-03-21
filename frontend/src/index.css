@@ -45,4 +45,13 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
   }
+
+  .yellow-bar {
+    background: #facc15; /* yellow-400 */
+  }
+
+  .scan-box {
+    border: 2px dashed rgba(99, 102, 241, 0.5);
+    border-radius: 12px;
+  }
 }
