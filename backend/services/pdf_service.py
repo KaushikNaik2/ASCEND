@@ -137,7 +137,7 @@ def _apply_markdown_structure(text: str) -> str:
 # ---------------------------------------------------------------------------
 class AdvancedNLPCleaner:
     """
-    A 4-stage NLP pipeline that sanitizes raw PDF text before it is sent
+    A 5-stage NLP pipeline that sanitizes raw PDF text before it is sent
     to Gemini.  Designed to maximally protect the context window by removing:
 
       Stage 1 — Unicode artifacts   (ligatures, fancy quotes, invisible chars)
