@@ -40,3 +40,7 @@ Thumbs.db
 
 !src/lib/
 .aider*
+test_pdfs/
+test_results/
+batch_tester.py
+scratchpad.py
