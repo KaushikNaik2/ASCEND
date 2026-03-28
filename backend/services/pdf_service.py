@@ -117,6 +117,22 @@ def _final_collapse(text: str) -> str:
     return text.strip()
 
 # ---------------------------------------------------------------------------
+# Stage 5 — Markdown Structure Injection
+# ---------------------------------------------------------------------------
+def _apply_markdown_structure(text: str) -> str:
+    """Converts syllabus structural markers into token-efficient Markdown."""
+    # 1. Main Headers -> H1
+    text = re.sub(r'(?i)^(Course Code|Subject Code|Teaching Scheme)', r'# \1', text, flags=re.MULTILINE)
+    
+    # 2. Module/Unit Headers -> H2
+    text = re.sub(r'(?i)^(Module\s*\d+|Unit\s*[IVX]+)', r'## \1', text, flags=re.MULTILINE)
+    
+    # 3. List Items -> Unordered Markdown Lists
+    text = re.sub(r'^\s*(\d+\.|[a-z]\))\s+', r'- ', text, flags=re.MULTILINE)
+    
+    return text
+
+# ---------------------------------------------------------------------------
 # Public API — AdvancedNLPCleaner
 # ---------------------------------------------------------------------------
 class AdvancedNLPCleaner:
@@ -128,16 +144,17 @@ class AdvancedNLPCleaner:
       Stage 2 — Structural noise    (page headers/footers, repeated punctuation)
       Stage 3 — Statistical noise   (number dumps, stray chars, ALL-CAPS dividers)
       Stage 4 — Final normalisation (excess blank lines, surrounding whitespace)
+      Stage 5 — Markdown Structure Injection (converts syllabus structural markers into token-efficient Markdown)
     """
 
     @staticmethod
     def clean(raw_text: str) -> str:
-        text = _unicode_normalize(raw_text)   # Stage 1
-        text = _structural_cleanup(text)       # Stage 2
-        text = _statistical_filter(text)       # Stage 3
-        text = _final_collapse(text)           # Stage 4
+        text = _unicode_normalize(raw_text)       # Stage 1: Fix broken PDF characters
+        text = _structural_cleanup(text)          # Stage 2: Remove headers/footers
+        text = _statistical_filter(text)          # Stage 3: Drop table noise
+        text = _apply_markdown_structure(text)    # Stage 4: Token-efficient MD injection
+        text = _final_collapse(text)              # Stage 5: Sweep up spacing artifacts
         return text
-
 
 # ---------------------------------------------------------------------------
 # Module-level convenience wrapper (keeps backward compatibility)
