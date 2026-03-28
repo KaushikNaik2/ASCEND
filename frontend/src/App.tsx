@@ -15,18 +15,24 @@ import RoadmapViewer from './pages/RoadmapViewer'
 import DashboardPage from './pages/DashboardPage'
 import StudyPlanPage from './pages/StudyPlanPage'
 import GuidesPage from './pages/GuidesPage'
+import OnboardingPage from './pages/OnboardingPage'
+import KnowledgeGraphPage from './pages/KnowledgeGraphPage'
+import QuizSessionPage from './pages/QuizSessionPage'
+import QuizResultsPage from './pages/QuizResultsPage'
+import LeaderboardPage from './pages/LeaderboardPage'
+import ProfilePage from './pages/ProfilePage'
 import { useStore } from './store/useStore'
 
 function App() {
   const location = useLocation()
   const { sceneState } = useStore()
-  
+
   // Use the global scene state if we're on the generate page so it can override the default
   // otherwise fallback to path-based logic
-  const currentSceneState = location.pathname === '/generate' && sceneState 
-    ? sceneState 
-    : location.pathname === '/' 
-      ? 'upload' 
+  const currentSceneState = location.pathname === '/generate' && sceneState
+    ? sceneState
+    : location.pathname === '/'
+      ? 'upload'
       : 'dashboard'
 
   return (
@@ -37,11 +43,11 @@ function App() {
         <Canvas camera={{ position: [0, 0, 15], fov: 50 }}>
           <color attach="background" args={['#0f172a']} />
           <KnowledgeConstellation appState={currentSceneState as any} />
-          <OrbitControls 
-            enableZoom={false} 
-            enablePan={false} 
-            autoRotate 
-            autoRotateSpeed={0.5} 
+          <OrbitControls
+            enableZoom={false}
+            enablePan={false}
+            autoRotate
+            autoRotateSpeed={0.5}
             maxPolarAngle={Math.PI / 1.5}
             minPolarAngle={Math.PI / 3}
           />
@@ -62,6 +68,12 @@ function App() {
               <Route path="/generate" element={<GeneratePage />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/guides" element={<GuidesPage />} />
+              <Route path="/onboarding" element={<OnboardingPage />} />
+              <Route path="/graph" element={<KnowledgeGraphPage />} />
+              <Route path="/quiz/:clusterId" element={<QuizSessionPage />} />
+              <Route path="/quiz/:sessionId/results" element={<QuizResultsPage />} />
+              <Route path="/leaderboard" element={<LeaderboardPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
               <Route path="/login" element={<AuthPage type="login" />} />
               <Route path="/signup" element={<AuthPage type="signup" />} />
               <Route path="*" element={<Navigate to="/" replace />} />
