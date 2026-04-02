@@ -9,7 +9,8 @@ echo "1. Windows (Git Bash/WSL)"
 echo "2. Mac"
 echo "3. Linux Ubuntu"
 echo "4. Linux Arch"
-read -p "Enter number (1-4): " os_choice
+echo "5. Pop!_OS"
+read -p "Enter number (1-5): " os_choice
 
 echo "Starting Backend and Frontend in separate windows..."
 
@@ -42,6 +43,20 @@ case $os_choice in
             # fallback to xterm
             xterm -title "Frontend (Vite)" -e bash -c "cd frontend && npm run dev; exec bash" &
             xterm -title "Backend (FastAPI)" -e bash -c "cd backend && source venv/bin/activate && uvicorn main:app --reload; exec bash" &
+        fi
+        ;;
+    5)
+        # Linux Pop!_OS
+        if command -v cosmic-term > /dev/null; then
+            cosmic-term -e bash -c "cd frontend && npm run dev; exec bash" &
+            cosmic-term -e bash -c "cd backend && source .venv/bin/activate && uvicorn main:app --reload; exec bash" &
+        elif command -v gnome-terminal > /dev/null; then
+            gnome-terminal --title="Frontend (Vite)" -- bash -c "cd frontend && npm run dev; exec bash"
+            gnome-terminal --title="Backend (FastAPI)" -- bash -c "cd backend && source .venv/bin/activate && uvicorn main:app --reload; exec bash"
+        else
+            # fallback to xterm
+            xterm -title "Frontend (Vite)" -e bash -c "cd frontend && npm run dev; exec bash" &
+            xterm -title "Backend (FastAPI)" -e bash -c "cd backend && source .venv/bin/activate && uvicorn main:app --reload; exec bash" &
         fi
         ;;
     *)
