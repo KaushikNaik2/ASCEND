@@ -44,3 +44,4 @@ test_pdfs/
 test_results/
 batch_tester.py
 scratchpad.py
+diff.txt
