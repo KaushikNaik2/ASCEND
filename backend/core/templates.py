@@ -89,3 +89,25 @@ def get_adaptive_quiz_prompt() -> PromptTemplate:
         """,
         input_variables=["user_proficiency", "target_topics_md", "num_questions"],
     )
+
+def get_refinement_prompt():
+    return PromptTemplate(
+        template="""
+        You are an expert curriculum data corrector. 
+        The previous extraction of a university syllabus module was incomplete or incorrect.
+        
+        RAW TEXT CONTEXT:
+        {raw_text}
+        
+        PREVIOUS JSON OUTPUT (That needs fixing):
+        {previous_json}
+        
+        USER FEEDBACK:
+        "{user_feedback}"
+        
+        TASK:
+        Apply the user's feedback to fix the JSON. 
+        Return ONLY the corrected, structured JSON for this specific module. Do not hallucinate topics not present in the raw text.
+        """,
+        input_variables=["raw_text", "previous_json", "user_feedback"]
+    )
