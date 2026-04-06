@@ -40,8 +40,18 @@ Thumbs.db
 
 !src/lib/
 .aider*
-test_pdfs/
-test_results/
+diff.txt
+
+# Testing & Scratch
+**/tests/
+test_*/
+*_test.py
+test_*.py
+*test*.py
+stress_test*
 batch_tester.py
 scratchpad.py
-diff.txt
+test_pdfs/
+test_results/
+firewall_breach.log
+todo.md
