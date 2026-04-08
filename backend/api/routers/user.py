@@ -73,6 +73,30 @@ def create_or_update_profile(payload: ProfileCreateRequest):
         raise HTTPException(status_code=500, detail=f"Failed to save profile: {str(e)}")
 
 
+@router.get("/{user_id}/profile")
+def get_profile(user_id: str):
+    """
+    Fetch the full user profile including computed stats (XP, mastered topics, streaks).
+    """
+    profile = db.get_user_profile(user_id)
+    if not profile:
+        # Fallback empty state if profile isn't fully created yet but user is authenticated
+        return {
+            "status": "success",
+            "data": {
+                "full_name": "Student",
+                "university": "ASCEND Explorer",
+                "joined_date": "Just now",
+                "xp": 0,
+                "streak_days": 0,
+                "topics_mastered": 0,
+                "study_hours": 0,
+                "active_roadmaps": 0
+            }
+        }
+    return {"status": "success", "data": profile}
+
+
 class TopicProgressRequest(BaseModel):
     topic_title: str
     status: str

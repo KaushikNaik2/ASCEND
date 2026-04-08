@@ -73,7 +73,50 @@ class DatabaseManager:
             return response.data[0] if response.data else {"proficiency_score": 0.1, "is_mastered": False}
         except Exception as e:
             print(f"❌ Proficiency Fetch Error: {e}")
+            print(f"❌ Proficiency Fetch Error: {e}")
             return {"proficiency_score": 0.1, "is_mastered": False}
+
+    def get_user_profile(self, user_id: str) -> dict | None:
+        """
+        Aggregates real user statistics for the Dashboard and Profile UI.
+        """
+        try:
+            # 1. Fetch basic profile data
+            prof_resp = self.client.table("user_profiles").select("*").eq("user_id", user_id).execute()
+            if not prof_resp.data:
+                return None
+            profile = prof_resp.data[0]
+
+            # 2. Fetch topic vectors to calculate XP and Mastery
+            vec_resp = self.client.table("user_topic_vectors").select("is_mastered").eq("user_id", user_id).execute()
+            vectors = vec_resp.data or []
+            
+            topics_attempted = len(vectors)
+            topics_mastered = sum(1 for v in vectors if v.get("is_mastered"))
+            
+            # XP Logic: 20 per attempt, +50 bonus for hitting mastery
+            xp = (topics_attempted * 20) + (topics_mastered * 50)
+            
+            # Study Hours (approximate: 30 mins per topic attempted)
+            study_hours = int(topics_attempted * 0.5)
+
+            # 3. Fetch active roadmaps
+            plans_resp = self.client.table("user_study_plans").select("id").eq("user_id", user_id).execute()
+            active_roadmaps = len(plans_resp.data) if plans_resp.data else 0
+
+            return {
+                "full_name": profile.get("full_name", "Student"),
+                "university": profile.get("university", "Unknown University"),
+                "joined_date": profile.get("created_at", "Just now"),
+                "xp": xp,
+                "streak_days": 1, # Future: Calculate from distinct last_updated dates
+                "topics_mastered": topics_mastered,
+                "study_hours": study_hours,
+                "active_roadmaps": active_roadmaps
+            }
+        except Exception as e:
+            print(f"❌ Get Profile Stats Error: {e}")
+            return None
 
     def get_plan_details(self, plan_id: str) -> dict | None:
         try:
@@ -95,7 +138,10 @@ class DatabaseManager:
                 "is_mastered": is_mastered,
                 "last_updated": "now()"
             }
-            return self.client.table("user_topic_vectors").upsert(payload).execute()
+            return self.client.table("user_topic_vectors").upsert(
+                payload, 
+                on_conflict="user_id,topic_name"
+            ).execute()
         except Exception as e:
             print(f"❌ Proficiency Update Error: {e}")
             raise e

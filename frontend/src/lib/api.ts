@@ -208,6 +208,29 @@ export interface SaveProfileRequest {
     university: string;
 }
 
+export interface UserProfileResponse {
+    status: string;
+    data: {
+        full_name: string;
+        university: string;
+        joined_date: string;
+        xp: number;
+        streak_days: number;
+        topics_mastered: number;
+        study_hours: number;
+        active_roadmaps: number;
+    };
+}
+
+/**
+ * GET /users/{userId}/profile
+ * Fetches the user's compiled statistics.
+ */
+export async function getUserProfile(userId: string): Promise<UserProfileResponse> {
+    const response = await fetch(`${BASE_URL}/users/${userId}/profile`);
+    return handleResponse<UserProfileResponse>(response);
+}
+
 /**
  * GET /users/{userId}/status
  * Checks if a user has a profile and an active roadmap.
