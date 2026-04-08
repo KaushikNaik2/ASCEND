@@ -127,8 +127,8 @@ class AdvancedNLPCleaner:
     def clean(raw_text: str) -> str:
         text = _unicode_normalize(raw_text)       # Stage 1: Unicode fix
         text = _structural_cleanup(text)          # Stage 2: Artifact removal
-        text = _statistical_filter(text)          # Stage 3: Noise reduction
-        text = _apply_markdown_structure(text)    # Stage 4: Markdown injection
+        #text = _statistical_filter(text)          # Stage 3: Noise reduction
+        #text = _apply_markdown_structure(text)    # Stage 4: Markdown injection
         text = _final_collapse(text)              # Stage 5: Final Normalization
         return text
 
@@ -139,23 +139,43 @@ def clean_pdf_text(raw_text: str) -> str:
     return AdvancedNLPCleaner.clean(raw_text)
 
 async def extract_and_clean_pdf(file_bytes: bytes) -> str:
-    """Reads PDF bytes and returns the finalized clean string."""
     full_text = ""
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for page in pdf.pages:
+            # 1. Grab any normal paragraphs first
             text = page.extract_text()
             if text:
                 full_text += text + "\n"
+            
+            # 2. Specifically target and extract the tables!
+            tables = page.extract_tables()
+            for table in tables:
+                for row in table:
+                    # Clean up the cells (remove None values and newlines inside cells)
+                    clean_row = [str(cell).replace('\n', ' ').strip() for cell in row if cell]
+                    
+                    # Join columns with a strict separator so Gemini knows it's a table
+                    if clean_row:
+                        full_text += " | ".join(clean_row) + "\n"
+                
+                full_text += "-" * 40 + "\n" # Add a divider after each table
 
     return clean_pdf_text(full_text)
 
 def split_into_subjects(clean_text: str) -> list:
-    """Splits text into chunks based on subject markers."""
+    """Splits text into chunks based on subject markers and filters out index tables."""
     delimiter_pattern = r'(?i)(?=Course\s+Code|Subject\s+Code|Teaching\s+Scheme)'
     raw_chunks  = re.split(delimiter_pattern, clean_text)
-    valid_chunks = [chunk.strip() for chunk in raw_chunks if len(chunk.strip()) > 800]
+    
+    valid_chunks = []
+    for chunk in raw_chunks:
+        # 1. Must be long enough to actually be a syllabus section
+        # 2. MUST contain the word "Module" or "Unit" (filters out grading tables)
+        if len(chunk.strip()) > 800 and re.search(r'(?i)\b(module|unit)\b', chunk):
+            valid_chunks.append(chunk.strip())
 
     if not valid_chunks:
+        # Fallback if the regex fails entirely
         return [clean_text]
 
     return valid_chunks

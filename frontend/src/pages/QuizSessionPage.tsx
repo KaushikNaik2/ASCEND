@@ -1,52 +1,61 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate, useParams } from 'react-router-dom'
-import { Clock, ChevronRight, Check, X, CircleAlert } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Clock, ChevronRight, Check, X, CircleAlert, Sparkles, Loader2 } from 'lucide-react'
 import type { QuizQuestion } from '../types'
-
-const MOCK_QUESTIONS: QuizQuestion[] = [
-    {
-        id: 'q1', cluster_id: 'c3', text: 'What is the base case condition needed to prevent infinite recursion?',
-        options: ['A condition that always evaluates to true', 'A condition where the function stops calling itself', 'The first line of any function', 'A loop that runs once'],
-        correct_index: 1, explanation: 'The base case is the condition under which a recursive function returns a value directly without making further recursive calls, preventing infinite loops.', difficulty: 2.0, bloom_level: 'Remember',
-    },
-    {
-        id: 'q2', cluster_id: 'c3', text: 'In the N-Queens problem using backtracking, what triggers a backtrack?',
-        options: ['Finding a valid queen placement', 'All rows are filled with queens', 'A queen placement conflicts with an existing queen', 'The board is empty'],
-        correct_index: 2, explanation: 'Backtracking is triggered when a newly placed queen attacks any previously placed queen (same row, column, or diagonal). We then undo that placement and try the next position.', difficulty: 3.5, bloom_level: 'Apply',
-    },
-    {
-        id: 'q3', cluster_id: 'c3', text: 'Which of the following is NOT a characteristic of recursive algorithms?',
-        options: ['They call themselves directly or indirectly', 'They require a base case', 'They always use less memory than iterative solutions', 'They can solve problems by dividing them into sub-problems'],
-        correct_index: 2, explanation: 'Recursive algorithms typically use MORE memory than iterative ones due to the function call stack overhead. Each recursive call adds a new stack frame.', difficulty: 2.5, bloom_level: 'Understand',
-    },
-    {
-        id: 'q4', cluster_id: 'c3', text: 'What is memoization in the context of recursive algorithms?',
-        options: ['A technique to minimize recursion depth', 'Storing results of expensive function calls to avoid recomputation', 'Reordering recursive calls for efficiency', 'Replacing recursion with iteration'],
-        correct_index: 1, explanation: 'Memoization caches the results of function calls so that when the same inputs occur again, the cached result is returned instead of recomputing, improving time complexity from exponential to polynomial in many cases.', difficulty: 3.0, bloom_level: 'Understand',
-    },
-    {
-        id: 'q5', cluster_id: 'c3', text: 'What is the time complexity of the naive recursive Fibonacci implementation?',
-        options: ['O(n)', 'O(n log n)', 'O(2ⁿ)', 'O(n²)'],
-        correct_index: 2, explanation: 'The naive recursive Fibonacci computes F(n-1) and F(n-2) at each step, creating an exponential tree of calls. This leads to O(2ⁿ) time complexity because each call branches into two sub-calls.', difficulty: 2.5, bloom_level: 'Analyze',
-    },
-]
+import { useStore } from '../store/useStore'
+import { getAdaptiveQuiz, submitQuizAnswer } from '../lib/api'
 
 const TOTAL_TIME = 45 // seconds per question
 
 export default function QuizSessionPage() {
-    const { clusterId: _clusterId } = useParams()
+    const [searchParams] = useSearchParams()
     const navigate = useNavigate()
+    const { user } = useStore()
+
+    const topic = searchParams.get('topic') || ''
+    const planId = searchParams.get('plan_id') || ''
+
+    const [questions, setQuestions] = useState<QuizQuestion[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+    const [isGenerating, setIsGenerating] = useState(false)
+    const [source, setSource] = useState<string>('vector_db')
+
     const [currentIndex, setCurrentIndex] = useState(0)
     const [selectedOption, setSelectedOption] = useState<number | null>(null)
-    const [answers, setAnswers] = useState<(number | null)[]>(Array(MOCK_QUESTIONS.length).fill(null))
+    const [answers, setAnswers] = useState<(number | null)[]>([])
     const [showFeedback, setShowFeedback] = useState(false)
     const [timeLeft, setTimeLeft] = useState(TOTAL_TIME)
-    const [timerActive, setTimerActive] = useState(true)
+    const [timerActive, setTimerActive] = useState(false)
     const timerRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
-    const question = MOCK_QUESTIONS[currentIndex]
-    const isLast = currentIndex === MOCK_QUESTIONS.length - 1
+    useEffect(() => {
+        async function loadQuiz() {
+            if (!user?.id || !topic || !planId) return
+
+            setIsLoading(true)
+            // If it takes more than 1 second, it's likely hitting the LLM fallback
+            const loaderTimeout = setTimeout(() => setIsGenerating(true), 1500)
+
+            try {
+                const response = await getAdaptiveQuiz(user.id, planId, topic)
+                setQuestions(response.questions)
+                setSource(response.source)
+                setAnswers(Array(response.questions.length).fill(null))
+                setTimerActive(true) // Start timer only after loading
+            } catch (err) {
+                console.error("Failed to load adaptive quiz", err)
+            } finally {
+                clearTimeout(loaderTimeout)
+                setIsLoading(false)
+                setIsGenerating(false)
+            }
+        }
+        loadQuiz()
+    }, [user?.id, topic, planId])
+
+    const question = questions[currentIndex]
+    const isLast = currentIndex === questions.length - 1
 
     // Timer
     useEffect(() => {
@@ -65,7 +74,7 @@ export default function QuizSessionPage() {
         return () => clearInterval(timerRef.current)
     }, [currentIndex, timerActive, showFeedback])
 
-    const handleAnswer = (optIdx: number) => {
+    const handleAnswer = async (optIdx: number) => {
         if (showFeedback) return
         clearInterval(timerRef.current)
         setSelectedOption(optIdx)
@@ -73,11 +82,26 @@ export default function QuizSessionPage() {
         newAnswers[currentIndex] = optIdx
         setAnswers(newAnswers)
         setShowFeedback(true)
+
+        // Submit proficiency adjustment to backend mathematically!
+        try {
+            if (user?.id && planId && topic && question) {
+                await submitQuizAnswer({
+                    user_id: user.id,
+                    subject_id: planId,
+                    topic_name: topic,
+                    question_difficulty: question.difficulty,
+                    is_correct: optIdx === question.correct_index
+                })
+            }
+        } catch (err) {
+            console.error('Failed to submit answer:', err)
+        }
     }
 
     const handleNext = () => {
         if (isLast) {
-            navigate('/quiz/session-1/results', { state: { answers, questions: MOCK_QUESTIONS } })
+            navigate('/quiz/session-1/results', { state: { answers, questions } })
             return
         }
         setCurrentIndex(i => i + 1)
@@ -86,10 +110,11 @@ export default function QuizSessionPage() {
         setTimeLeft(TOTAL_TIME)
     }
 
-    const isCorrect = selectedOption === question.correct_index
+    const isCorrect = question ? selectedOption === question.correct_index : false
     const timeProgress = (timeLeft / TOTAL_TIME) * 100
 
     const optionStyle = (idx: number) => {
+        if (!question) return ''
         if (!showFeedback) {
             return selectedOption === idx
                 ? 'border-indigo-500 bg-indigo-500/15 text-white'
@@ -100,6 +125,41 @@ export default function QuizSessionPage() {
         return 'border-white/5 bg-white/3 text-slate-600'
     }
 
+    if (isLoading) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center p-6 relative z-10">
+                <Loader2 className="w-12 h-12 text-indigo-400 animate-spin mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">Preparing Assessment</h2>
+                <p className="text-slate-400 text-center max-w-md">
+                    {isGenerating
+                        ? 'Evaluating your knowledge vector and crafting hyper-personalized questions via Gemini...'
+                        : 'Retrieving questions matching your Target Difficulty from the Knowledge Graph...'}
+                </p>
+                {isGenerating && (
+                    <motion.div
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                        className="mt-6 flex items-center gap-2 text-indigo-300 bg-indigo-500/10 px-4 py-2 rounded-full border border-indigo-500/20 text-sm font-medium"
+                    >
+                        <Sparkles className="w-4 h-4" /> AI Generation in Progress
+                    </motion.div>
+                )}
+            </div>
+        )
+    }
+
+    if (!questions.length) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center p-6 relative z-10">
+                <CircleAlert className="w-12 h-12 text-red-400 mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">Unable to Load Quiz</h2>
+                <p className="text-slate-400 mb-6">We could not generate questions for this topic.</p>
+                <button onClick={() => navigate(-1)} className="px-6 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-white font-medium transition-colors">
+                    Go Back
+                </button>
+            </div>
+        )
+    }
+
     return (
         <div className="min-h-screen flex flex-col items-center justify-center p-6 relative z-10">
             <div className="w-full max-w-2xl">
@@ -107,8 +167,17 @@ export default function QuizSessionPage() {
                 {/* ── Header ── */}
                 <div className="flex items-center justify-between mb-6">
                     <div>
-                        <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Recursion &amp; Backtracking</p>
-                        <p className="text-sm text-slate-400 mt-0.5">Question {currentIndex + 1} of {MOCK_QUESTIONS.length}</p>
+                        <p className="text-xs text-slate-500 uppercase tracking-wider font-semibold">
+                            {topic}
+                        </p>
+                        <div className="flex items-center gap-3 mt-1">
+                            <p className="text-sm text-slate-400">Question {currentIndex + 1} of {questions.length}</p>
+                            {source === 'gemini' && (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-md font-medium uppercase tracking-wider flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3" /> Live Generated
+                                </span>
+                            )}
+                        </div>
                     </div>
                     <button
                         onClick={() => setTimerActive(v => !v)}
@@ -123,7 +192,7 @@ export default function QuizSessionPage() {
                 <div className="mb-2">
                     <div className="w-full h-1.5 rounded-full bg-white/5 overflow-hidden mb-1">
                         <motion.div
-                            animate={{ width: `${((currentIndex + 1) / MOCK_QUESTIONS.length) * 100}%` }}
+                            animate={{ width: `${((currentIndex + 1) / questions.length) * 100}%` }}
                             className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-500"
                         />
                     </div>

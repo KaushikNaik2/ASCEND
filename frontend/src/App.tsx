@@ -69,6 +69,9 @@ function App() {
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/guides" element={<GuidesPage />} />
               <Route path="/onboarding" element={<OnboardingPage />} />
+              <Route path="/welcome" element={<OnboardingPage />} />
+              <Route path="/pathfinder" element={<div className="min-h-screen flex items-center justify-center text-white text-2xl font-bold relative z-10">Pathfinder — Coming in Phase 2</div>} />
+              <Route path="/tracks" element={<div className="min-h-screen flex items-center justify-center text-white text-2xl font-bold relative z-10">Curated Tracks — Coming in Phase 2</div>} />
               <Route path="/graph" element={<KnowledgeGraphPage />} />
               <Route path="/quiz/:clusterId" element={<QuizSessionPage />} />
               <Route path="/quiz/:sessionId/results" element={<QuizResultsPage />} />

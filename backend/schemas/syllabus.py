@@ -3,6 +3,7 @@ from typing import List, Optional
 
 class SubTopic(BaseModel):
     title: str = Field(description="Name of the detailed topic or sub-topic")
+    description: Optional[str] = Field(description="A 1-2 sentence brief description of this topic.", default="")
     estimated_hours: Optional[str] = Field(description="Time required for this topic, if mentioned")
 
 class Module(BaseModel):
@@ -14,3 +15,6 @@ class SyllabusResponse(BaseModel):
     subject_name: str = Field(description="Name of the subject or course found in the syllabus")
     semester: Optional[str] = Field(description="The semester or year if mentioned")
     modules: List[Module] = Field(description="List of all modules in the syllabus")
+
+class SyllabusCollection(BaseModel):
+    subjects: List[SyllabusResponse] = Field(description="List of all theoretical subjects found in the document chunk.")

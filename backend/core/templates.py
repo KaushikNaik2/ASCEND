@@ -17,6 +17,7 @@ def get_syllabus_extraction_prompt() -> PromptTemplate:
         4. ZERO HALLUCINATION: You must ONLY extract what is written in the text. Do not invent, infer, or add outside topics.
         5. IGNORE NOISE: Bypass administrative fluff, teaching schemes, grade distributions, and scattered watermark letters.
         
+        CRITICAL RULE: You must completely ignore and exclude any sections related to Laboratory (Lab), Practicals, Term Work, or Experiments. Only extract theoretical syllabus modules and topics.
         RAW TEXT:
         {text}
         """,

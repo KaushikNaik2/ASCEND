@@ -1,23 +1,50 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Calendar as CalendarIcon, Clock, GripVertical, Download } from 'lucide-react'
-import { mockSyllabus } from '../lib/mockData'
+import { useStore } from '../store/useStore'
+import { useNavigate } from 'react-router-dom'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 
 export default function StudyPlanPage() {
-  const [schedule, setSchedule] = useState<Record<string, any[]>>({
-    'Monday': [mockSyllabus.modules[0].topics[0], mockSyllabus.modules[0].topics[1]],
-    'Tuesday': [mockSyllabus.modules[0].topics[2]],
-    'Wednesday': [mockSyllabus.modules[1].topics[0], mockSyllabus.modules[1].topics[1]],
-    'Thursday': [mockSyllabus.modules[1].topics[2]],
-    'Friday': [mockSyllabus.modules[2].topics[0]],
-    'Saturday': [mockSyllabus.modules[2].topics[1], mockSyllabus.modules[2].topics[2]],
-    'Sunday': [mockSyllabus.modules[2].topics[3]]
-  })
+  const { currentSyllabus } = useStore()
+  const navigate = useNavigate()
 
+  // Build the initial schedule by distributing topics across days
+  const initialSchedule = useMemo(() => {
+    if (!currentSyllabus) return null
+
+    const allTopics = currentSyllabus.modules.flatMap(m => m.topics)
+    const sched: Record<string, any[]> = {}
+    DAYS.forEach(d => sched[d] = [])
+
+    allTopics.forEach((topic, i) => {
+      sched[DAYS[i % DAYS.length]].push(topic)
+    })
+
+    return sched
+  }, [currentSyllabus])
+
+  const [schedule, setSchedule] = useState<Record<string, any[]> | null>(initialSchedule)
   const [draggedItem, setDraggedItem] = useState<any>(null)
   const [draggedFrom, setDraggedFrom] = useState<string | null>(null)
+
+  if (!currentSyllabus || !schedule) {
+    return (
+      <div className="w-full min-h-[85vh] flex items-center justify-center relative z-10">
+        <div className="text-center glass-panel p-10 rounded-3xl border border-white/10 max-w-md">
+          <h2 className="text-2xl font-bold text-white mb-3">No Syllabus Loaded</h2>
+          <p className="text-slate-400 mb-6">Upload a syllabus PDF first to build your study plan.</p>
+          <button
+            onClick={() => navigate('/generate')}
+            className="px-6 py-3 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-medium transition-all cursor-pointer"
+          >
+            Go to Upload
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const onDragStart = (e: React.DragEvent, item: any, day: string) => {
     setDraggedItem(item)
@@ -30,10 +57,9 @@ export default function StudyPlanPage() {
     if (!draggedItem || !draggedFrom || draggedFrom === targetDay) return
 
     setSchedule(prev => {
+      if (!prev) return prev
       const newSchedule = { ...prev }
-      // Remove from old day
-      newSchedule[draggedFrom] = newSchedule[draggedFrom].filter(t => t.title !== draggedItem.title)
-      // Add to new day
+      newSchedule[draggedFrom!] = newSchedule[draggedFrom!].filter(t => t.title !== draggedItem.title)
       newSchedule[targetDay] = [...newSchedule[targetDay], draggedItem]
       return newSchedule
     })
@@ -45,11 +71,11 @@ export default function StudyPlanPage() {
     <div className="w-full min-h-[85vh] p-6 max-w-7xl mx-auto relative z-10 flex flex-col mt-4">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
         <div>
-           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-bold mb-3">
-              <CalendarIcon className="w-3.5 h-3.5" />
-              Weekly Schedule
-           </div>
-           <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">{mockSyllabus.subject_name}</h1>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-bold mb-3">
+            <CalendarIcon className="w-3.5 h-3.5" />
+            Weekly Schedule
+          </div>
+          <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">{currentSyllabus.subject_name}</h1>
         </div>
         <button className="flex items-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl font-medium transition-colors shadow-lg cursor-pointer">
           <Download className="w-4 h-4" />
@@ -59,8 +85,8 @@ export default function StudyPlanPage() {
 
       <div className="flex gap-4 overflow-x-auto pb-8 snap-x p-2 scrollbar-hide">
         {DAYS.map((day) => (
-          <div 
-            key={day} 
+          <div
+            key={day}
             className="flex-1 min-w-[280px] snap-center flex flex-col"
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => onDrop(e, day)}
@@ -71,11 +97,11 @@ export default function StudyPlanPage() {
                 {schedule[day]?.length || 0} topics
               </span>
             </div>
-            
+
             <div className={`flex-1 min-h-[200px] p-3 border border-white/10 rounded-b-2xl bg-slate-900/50 backdrop-blur-sm transition-colors ${draggedFrom === day ? 'bg-slate-800/30' : ''}`}>
               <div className="space-y-3">
                 {schedule[day]?.map((topic, j) => (
-                  <motion.div 
+                  <motion.div
                     layout
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -93,18 +119,17 @@ export default function StudyPlanPage() {
                         <h4 className="text-sm font-semibold text-slate-200 mb-2 leading-snug">{topic.title}</h4>
                         <div className="flex items-center justify-between">
                           <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-900/50 px-2 py-1 rounded-md">
-                            <Clock className="w-3 h-3" /> {topic.estimated_hours}
+                            <Clock className="w-3 h-3" /> {topic.estimated_hours || '—'}
                           </span>
                           <div className="w-1/2 h-1.5 bg-slate-900 rounded-full overflow-hidden">
-                             {/* Mock bar representing length of time visually */}
-                             <div className="h-full bg-indigo-500 rounded-full" style={{ width: topic.estimated_hours === '4h' ? '80%' : topic.estimated_hours === '3.5h' ? '70%' : topic.estimated_hours === '3h' ? '60%' : '40%' }}></div>
+                            <div className="h-full bg-indigo-500 rounded-full" style={{ width: topic.estimated_hours === '4h' ? '80%' : topic.estimated_hours === '3.5h' ? '70%' : topic.estimated_hours === '3h' ? '60%' : '40%' }}></div>
                           </div>
                         </div>
                       </div>
                     </div>
                   </motion.div>
                 ))}
-                
+
                 {(!schedule[day] || schedule[day].length === 0) && (
                   <div className="h-24 border-2 border-dashed border-white/10 rounded-xl flex items-center justify-center text-slate-500 text-sm">
                     Drop topics here

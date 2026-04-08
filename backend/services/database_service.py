@@ -54,7 +54,7 @@ class DatabaseManager:
                 "verified_by": user_id
             }
             
-            response = self.client.table("golden_syllabuses").insert(payload).select().execute()
+            response = self.client.table("golden_syllabuses").insert(payload).execute()
             return response
         except Exception as e:
             print(f"❌ Draft Save Error: {e}")
@@ -70,10 +70,20 @@ class DatabaseManager:
                 .eq("topic_name", topic_name) \
                 .execute()
         
-            return response.data if response.data else {"proficiency_score": 0.1, "is_mastered": False} # <-- Added
+            return response.data[0] if response.data else {"proficiency_score": 0.1, "is_mastered": False}
         except Exception as e:
             print(f"❌ Proficiency Fetch Error: {e}")
             return {"proficiency_score": 0.1, "is_mastered": False}
+
+    def get_plan_details(self, plan_id: str) -> dict | None:
+        try:
+            response = self.client.table("user_study_plans").select("golden_syllabus_id").eq("id", plan_id).execute()
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ Plan Fetch Error: {e}")
+            return None
 
     def update_user_proficiency(self, user_id: str, subject_id: str, topic_name: str, new_score: float, is_mastered: bool):
         try:
@@ -145,5 +155,47 @@ class DatabaseManager:
                 .execute()
         except Exception as e:
             print(f"❌ Consensus Tracking Error: {e}")
+
+    # --- ROADMAP & PROGRESS OPERATIONS ---
+
+    def get_user_roadmaps(self, user_id: str):
+        try:
+            response = self.client.table("user_study_plans") \
+                .select("id, golden_syllabus_id, customized_syllabus, progress_state, created_at") \
+                .eq("user_id", user_id) \
+                .order("created_at", desc=True) \
+                .execute()
+            return response.data if response.data else []
+        except Exception as e:
+            print(f"❌ Fetch Roadmaps Error: {e}")
+            return []
+
+    def update_topic_status(self, user_id: str, plan_id: str, topic_title: str, status: str):
+        try:
+            # 1. Fetch current progress_state
+            resp = self.client.table("user_study_plans") \
+                .select("progress_state") \
+                .eq("id", plan_id) \
+                .eq("user_id", user_id) \
+                .execute()
+            
+            if not resp.data:
+                raise Exception("Study plan not found or unauthorized")
+                
+            current_state = resp.data[0].get("progress_state") or {}
+            
+            # 2. Update status
+            current_state[topic_title] = status
+            
+            # 3. Save back
+            update_resp = self.client.table("user_study_plans") \
+                .update({"progress_state": current_state}) \
+                .eq("id", plan_id) \
+                .execute()
+                
+            return current_state
+        except Exception as e:
+            print(f"❌ Update Topic Status Error: {e}")
+            raise e
 
 db = DatabaseManager()

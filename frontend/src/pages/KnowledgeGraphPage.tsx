@@ -1,37 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
-import { Flame, Zap, Search, Grid3X3, List, Lock } from 'lucide-react'
+import { useNavigate, Link } from 'react-router-dom'
+import { Flame, Zap, Search, Grid3X3, List, Lock, Loader2 } from 'lucide-react'
 import AssessmentDrawer from '../components/ui/AssessmentDrawer'
 import WeakTopicBanner from '../components/ui/WeakTopicBanner'
 import type { ConceptCluster, Track } from '../types'
-
-// ── Mock Data ────────────────────────────────────────────────────────────────
-const MOCK_ACADEMIC: ConceptCluster[] = [
-    { id: 'c1', label: 'Introduction to Algorithms', module_ref: 'Module 1', bloom_depth: 'Remember', difficulty_avg: 1.5, mastery_score: 0.92, mastery_state: 'mastered', order_index: 0, weakness_tags: [] },
-    { id: 'c2', label: 'Sorting & Searching', module_ref: 'Module 1', bloom_depth: 'Apply', difficulty_avg: 2.0, mastery_score: 0.78, mastery_state: 'mastered', order_index: 1, prerequisites: ['c1'] },
-    { id: 'c3', label: 'Recursion & Backtracking', module_ref: 'Module 2', bloom_depth: 'Apply', difficulty_avg: 2.8, mastery_score: 0.41, mastery_state: 'in_progress', order_index: 2, prerequisites: ['c2'], weakness_tags: ['Memoization', 'Tree Traversal'] },
-    { id: 'c4', label: 'Dynamic Programming', module_ref: 'Module 2', bloom_depth: 'Analyze', difficulty_avg: 4.2, mastery_score: 0.15, mastery_state: 'in_progress', order_index: 3, prerequisites: ['c3'], weakness_tags: ['DP on Grids', 'Knapsack', 'LIS'] },
-    { id: 'c5', label: 'Graph Theory', module_ref: 'Module 3', bloom_depth: 'Analyze', difficulty_avg: 3.5, mastery_score: 0.0, mastery_state: 'available', order_index: 4, prerequisites: ['c2'] },
-    { id: 'c6', label: 'BFS & DFS', module_ref: 'Module 3', bloom_depth: 'Apply', difficulty_avg: 3.0, mastery_score: 0.0, mastery_state: 'available', order_index: 5, prerequisites: ['c5'] },
-    { id: 'c7', label: 'Shortest Path Algorithms', module_ref: 'Module 3', bloom_depth: 'Analyze', difficulty_avg: 4.0, mastery_score: 0.0, mastery_state: 'locked', order_index: 6, prerequisites: ['c6'] },
-    { id: 'c8', label: 'Network Flow', module_ref: 'Module 4', bloom_depth: 'Analyze', difficulty_avg: 4.8, mastery_score: 0.0, mastery_state: 'locked', order_index: 7, prerequisites: ['c7'] },
-    { id: 'c9', label: 'String Algorithms', module_ref: 'Module 4', bloom_depth: 'Apply', difficulty_avg: 3.2, mastery_score: 0.0, mastery_state: 'locked', order_index: 8 },
-    { id: 'c10', label: 'Computational Geometry', module_ref: 'Module 5', bloom_depth: 'Analyze', difficulty_avg: 5.0, mastery_score: 0.0, mastery_state: 'locked', order_index: 9 },
-    { id: 'c11', label: 'Amortized Analysis', module_ref: 'Module 5', bloom_depth: 'Analyze', difficulty_avg: 4.6, mastery_score: 0.0, mastery_state: 'locked', order_index: 10 },
-    { id: 'c12', label: 'Complexity Theory', module_ref: 'Module 5', bloom_depth: 'Understand', difficulty_avg: 3.8, mastery_score: 0.0, mastery_state: 'locked', order_index: 11 },
-]
-
-const MOCK_FORGE: ConceptCluster[] = [
-    { id: 'f1', label: 'Arrays & Strings', module_ref: 'DSA Fundamentals', bloom_depth: 'Apply', difficulty_avg: 2.0, mastery_score: 0.88, mastery_state: 'mastered', order_index: 0 },
-    { id: 'f2', label: 'Linked Lists', module_ref: 'DSA Fundamentals', bloom_depth: 'Apply', difficulty_avg: 2.5, mastery_score: 0.65, mastery_state: 'in_progress', order_index: 1, weakness_tags: ['Reverse LL', 'Cycle Detection'] },
-    { id: 'f3', label: 'Trees & BST', module_ref: 'Non-Linear DS', bloom_depth: 'Apply', difficulty_avg: 3.0, mastery_score: 0.45, mastery_state: 'in_progress', order_index: 2, weakness_tags: ['AVL Rotations', 'Segment Trees'] },
-    { id: 'f4', label: 'Heaps & Priority Queue', module_ref: 'Non-Linear DS', bloom_depth: 'Apply', difficulty_avg: 3.3, mastery_score: 0.0, mastery_state: 'available', order_index: 3 },
-    { id: 'f5', label: 'Graphs (Interview)', module_ref: 'Graph Problems', bloom_depth: 'Analyze', difficulty_avg: 4.0, mastery_score: 0.0, mastery_state: 'available', order_index: 4 },
-    { id: 'f6', label: 'DP Patterns', module_ref: 'Advanced', bloom_depth: 'Analyze', difficulty_avg: 4.5, mastery_score: 0.0, mastery_state: 'locked', order_index: 5 },
-    { id: 'f7', label: 'System Design Basics', module_ref: 'System Design', bloom_depth: 'Understand', difficulty_avg: 3.5, mastery_score: 0.0, mastery_state: 'locked', order_index: 6 },
-    { id: 'f8', label: 'Scalability & CAP', module_ref: 'System Design', bloom_depth: 'Analyze', difficulty_avg: 4.8, mastery_score: 0.0, mastery_state: 'locked', order_index: 7 },
-]
+import { useStore } from '../store/useStore'
+import { getUserRoadmaps } from '../lib/api'
+import type { UserRoadmap } from '../lib/api'
 
 // ── Node Colors ───────────────────────────────────────────────────────────────
 const nodeColor: Record<string, string> = {
@@ -88,40 +64,158 @@ function KnowledgeHeatmap() {
 }
 
 export default function KnowledgeGraphPage() {
+    const { user } = useStore()
     const navigate = useNavigate()
-    const [activeTrack, setActiveTrack] = useState<Track>('academic')
+    const [roadmaps, setRoadmaps] = useState<UserRoadmap[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+
+    const [activeTrack, setActiveTrack] = useState<string>('')
     const [selectedCluster, setSelectedCluster] = useState<ConceptCluster | null>(null)
     const [search, setSearch] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
 
-    const clusters = activeTrack === 'academic' ? MOCK_ACADEMIC : MOCK_FORGE
-    const weakClusters = clusters
-        .filter(c => c.mastery_state === 'in_progress' && c.mastery_score < 0.5)
-        .sort((a, b) => a.mastery_score - b.mastery_score)
+    useEffect(() => {
+        async function loadRoadmaps() {
+            if (!user?.id) return
+            try {
+                const response = await getUserRoadmaps(user.id)
+                setRoadmaps(response.data || [])
+            } catch (error) {
+                console.error('Failed to load roadmaps:', error)
+            } finally {
+                setIsLoading(false)
+            }
+        }
+        loadRoadmaps()
+    }, [user?.id])
 
-    const filtered = clusters.filter(c =>
+    const allSubjects = useMemo(() => {
+        return roadmaps.flatMap(rm => {
+            if (!rm.customized_syllabus) return [];
+
+            let rawSyllabus = rm.customized_syllabus;
+            if (typeof rawSyllabus === 'string') {
+                try { rawSyllabus = JSON.parse(rawSyllabus); } catch (e) { }
+            }
+
+            let subjectsArray = [];
+            if (Array.isArray(rawSyllabus)) {
+                if (rawSyllabus.length > 0 && rawSyllabus[0].topics) {
+                    subjectsArray = [{ subject_name: "Legacy Roadmap", modules: rawSyllabus }];
+                } else {
+                    subjectsArray = rawSyllabus;
+                }
+            } else if (rawSyllabus?.modules) {
+                subjectsArray = [rawSyllabus];
+            } else {
+                subjectsArray = [{ subject_name: "Empty Roadmap", modules: [] }];
+            }
+
+            return subjectsArray.map((subj, index) => ({
+                id: `${rm.id}-${index}`,
+                plan_id: rm.id,
+                subject_name: subj.subject_name || "Untitled",
+                modules: subj.modules || [],
+                progress_state: rm.progress_state || {}
+            }))
+        })
+    }, [roadmaps])
+
+    useEffect(() => {
+        if (allSubjects.length > 0 && !activeTrack) {
+            setActiveTrack(allSubjects[0].id)
+        }
+    }, [allSubjects, activeTrack])
+
+    const clusters = useMemo(() => {
+        const currentSubject = allSubjects.find(s => s.id === activeTrack)
+        if (!currentSubject) return []
+
+        return currentSubject.modules.flatMap((mod: any, modIdx: number) =>
+            (mod.topics || []).map((topic: any, topicIdx: number) => {
+                const title = topic.title || ''
+                const state = currentSubject.progress_state[title] || 'pending'
+
+                let mastery_state = 'locked'
+                let mastery_score = 0
+
+                if (state === 'done') {
+                    mastery_state = 'mastered'
+                    mastery_score = 1.0
+                } else if (state === 'ongoing') {
+                    mastery_state = 'in_progress'
+                    mastery_score = 0.5
+                } else if (state === 'skipped') {
+                    mastery_state = 'available'
+                    mastery_score = 0.0
+                } else {
+                    mastery_state = 'available' // Treat pending as available in the graph
+                }
+
+                return {
+                    id: `${modIdx}-${topicIdx}`,
+                    label: title,
+                    module_ref: mod.title || mod.module_number || `Module ${modIdx + 1}`,
+                    bloom_depth: 'Understand',
+                    difficulty_avg: 3.0,
+                    mastery_score,
+                    mastery_state,
+                    order_index: modIdx * 100 + topicIdx,
+                } as ConceptCluster
+            })
+        )
+    }, [allSubjects, activeTrack])
+    const weakClusters = clusters
+        .filter((c: ConceptCluster) => c.mastery_state === 'in_progress' && c.mastery_score < 0.5)
+        .sort((a: ConceptCluster, b: ConceptCluster) => a.mastery_score - b.mastery_score)
+
+    const filtered = clusters.filter((c: ConceptCluster) =>
         c.label.toLowerCase().includes(search.toLowerCase()) ||
         c.module_ref.toLowerCase().includes(search.toLowerCase())
     )
 
-    const handleStartQuiz = (clusterId: string) => {
+    const handleStartQuiz = (_clusterId: string, nodeTopic: string = '', planId: string = '') => {
         setSelectedCluster(null)
-        navigate(`/quiz/${clusterId}`)
+        if (nodeTopic && planId) {
+            navigate(`/quiz/session?topic=${encodeURIComponent(nodeTopic)}&plan_id=${planId}`)
+        } else {
+            navigate(`/quiz/session`)
+        }
     }
 
     const handleRevisit = (clusterId: string) => {
-        const cluster = clusters.find(c => c.id === clusterId) ?? null
+        const cluster = clusters.find((c: ConceptCluster) => c.id === clusterId) ?? null
         setSelectedCluster(cluster)
     }
 
     const stats = {
-        mastered: clusters.filter(c => c.mastery_state === 'mastered').length,
-        inProgress: clusters.filter(c => c.mastery_state === 'in_progress').length,
-        available: clusters.filter(c => c.mastery_state === 'available').length,
+        mastered: clusters.filter((c: ConceptCluster) => c.mastery_state === 'mastered').length,
+        inProgress: clusters.filter((c: ConceptCluster) => c.mastery_state === 'in_progress').length,
+        available: clusters.filter((c: ConceptCluster) => c.mastery_state === 'available').length,
         total: clusters.length,
     }
 
     const totalXP = 1350
+
+    if (isLoading) {
+        return (
+            <div className="w-full min-h-screen flex items-center justify-center pt-24 bg-slate-950 text-white">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+            </div>
+        )
+    }
+
+    if (allSubjects.length === 0) {
+        return (
+            <div className="w-full min-h-screen p-6 max-w-7xl mx-auto flex flex-col items-center justify-center z-10 pt-24 text-center">
+                <h2 className="text-2xl font-bold text-white mb-4">No Roadmaps Found</h2>
+                <p className="text-slate-400 mb-6">Upload a syllabus to automatically generate your Knowledge Graph!</p>
+                <Link to="/roadmaps" className="px-6 py-3 rounded-xl bg-indigo-500 hover:bg-indigo-600 font-bold transition-all text-white">
+                    Go to Roadmaps
+                </Link>
+            </div>
+        )
+    }
 
     return (
         <div className="w-full min-h-screen p-6 max-w-7xl mx-auto relative z-10 pt-24">
@@ -134,24 +228,26 @@ export default function KnowledgeGraphPage() {
                 </div>
 
                 {/* Mode switcher */}
-                <div className="flex items-center gap-1 p-1 rounded-2xl bg-white/5 border border-white/10 w-fit">
-                    {(['academic', 'forge'] as Track[]).map(t => (
-                        <button
-                            key={t}
-                            onClick={() => setActiveTrack(t)}
-                            className={`relative px-5 py-2 rounded-xl text-sm font-bold capitalize transition-all ${activeTrack === t ? 'text-white' : 'text-slate-500 hover:text-slate-300'
-                                }`}
-                        >
-                            {activeTrack === t && (
-                                <motion.div
-                                    layoutId="track-pill"
-                                    className="absolute inset-0 rounded-xl bg-gradient-to-r from-indigo-500/30 to-purple-500/30 border border-indigo-500/30"
-                                />
-                            )}
-                            <span className="relative z-10">{t === 'forge' ? 'FORGE' : 'Academic'}</span>
-                        </button>
-                    ))}
-                </div>
+                {allSubjects.length > 0 && (
+                    <div className="flex gap-2 pb-2 overflow-x-auto hide-scrollbar snap-x max-w-[50vw]">
+                        {allSubjects.map(s => (
+                            <button
+                                key={s.id}
+                                onClick={() => setActiveTrack(s.id)}
+                                className={`snap-start shrink-0 relative px-4 py-2 rounded-xl text-sm font-bold capitalize transition-all whitespace-nowrap ${activeTrack === s.id ? 'text-white' : 'text-slate-400 hover:text-slate-200 bg-white/5 border border-white/10'
+                                    }`}
+                            >
+                                {activeTrack === s.id && (
+                                    <motion.div
+                                        layoutId="track-pill"
+                                        className="absolute inset-0 rounded-xl bg-gradient-to-r from-indigo-500/30 to-purple-500/30 border border-indigo-500/30"
+                                    />
+                                )}
+                                <span className="relative z-10">{s.subject_name}</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
 
             {/* Weak cluster banner */}
@@ -243,7 +339,7 @@ export default function KnowledgeGraphPage() {
                         ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pb-24'
                         : 'flex flex-col gap-2 pb-24'}
                 >
-                    {filtered.map((c, i) => (
+                    {filtered.map((c: ConceptCluster, i: number) => (
                         <motion.button
                             key={c.id}
                             initial={{ opacity: 0, scale: 0.9 }}

@@ -44,10 +44,6 @@ export default function Header() {
             Roadmaps
             <span className={`absolute -bottom-1 left-0 h-0.5 bg-blue-500 transition-all ${isActive('/roadmaps') ? 'w-full' : 'w-0 group-hover:w-full'}`} />
           </Link>
-          <Link to="/generate" className={`hover:text-white transition-colors relative group ${isActive('/generate') ? 'text-white' : ''}`}>
-            Generate
-            <span className={`absolute -bottom-1 left-0 h-0.5 bg-blue-500 transition-all ${isActive('/generate') ? 'w-full' : 'w-0 group-hover:w-full'}`} />
-          </Link>
           <Link to="/graph" className={`hover:text-white transition-colors relative group flex items-center gap-1.5 ${isActive('/graph') ? 'text-white' : ''}`}>
             <Network className="w-3.5 h-3.5" />
             Graph

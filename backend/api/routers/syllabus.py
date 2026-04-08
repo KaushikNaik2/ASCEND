@@ -1,9 +1,11 @@
 # backend/api/routers/syllabus.py
 
-from fastapi import APIRouter, File, UploadFile, HTTPException,Form
-from pydantic import BaseModel,Field
+from fastapi import APIRouter, File, UploadFile, HTTPException, Form
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 import asyncio
 import os
+import json
 
 # Updated Imports
 from services.pdf_service import extract_and_clean_pdf, split_into_subjects, calculate_file_hash
@@ -60,103 +62,126 @@ async def upload_syllabus(file: UploadFile = File(...), department_code: str = F
         if len(file_bytes) > MAX_SIZE:
             raise HTTPException(status_code=413, detail="Payload Too Large: File exceeds 5MB limit.")
 
-    # --- 2. THE VAULT CHECK (Saves tokens & time) ---
-    print("🔍 Hashing uploaded file...")
-    file_hash = calculate_file_hash(file_bytes)
-    
-    print(f"📡 Checking Supabase Vault for hash: {file_hash[:10]}...")
-    raw_record = db.get_syllabus_by_hash(file_hash)
-    
-    if raw_record:
-        # 🛡️ THE ANTI-FREEZE FIX: No loops. Just flat, safe extraction.
-        existing_record = raw_record
+    async def process_stream():
+        # --- 2. THE VAULT CHECK (Saves tokens & time) ---
+        yield json.dumps({"progress": 10, "step": 0, "message": "Hashing file and checking Secure Vault..."}) + "\n"
         
-        # If it's a list, grab the first item
-        if isinstance(existing_record, list) and len(existing_record) > 0:
-            existing_record = existing_record
-            
-        # If Supabase somehow double-nested it [[{...}]], grab it again
-        if isinstance(existing_record, list) and len(existing_record) > 0:
-            existing_record = existing_record
-
-        # Fallback if it's completely mangled
-        if not isinstance(existing_record, dict):
-            existing_record = {}
-                
-        print(f"🎯 Vault Hit! Returning cached SSOT for hash: {file_hash[:10]}...")
-        return {
-            "status": "success",
-            "source": "vault", 
-            "filename": file.filename,
-            "data": existing_record.get("syllabus_data", []),
-            "golden_syllabus_id": existing_record.get("id") 
-        }
-
-    # --- 3. THE EXPENSIVE PATH (Extraction & AI) ---
-    try:
-        print("📄 Vault Miss. Starting pdfplumber extraction (this may take 15-30 seconds)...")
-        clean_text = await extract_and_clean_pdf(file_bytes)
+        print("🔍 Hashing uploaded file...")
+        file_hash = calculate_file_hash(file_bytes)
         
-        print("✂️ Text cleaned. Splitting into subjects...")
-        subject_chunks = split_into_subjects(clean_text)
-        print(f"✅ Found {len(subject_chunks)} chunks.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF Parsing Error: {str(e)}")
+        print(f"📡 Checking Supabase Vault for hash: {file_hash[:10]}...")
+        raw_record = db.get_syllabus_by_hash(file_hash)
+        
+        if raw_record:
+            # 🛡️ THE ANTI-FREEZE FIX
+            existing_record = raw_record
+            if isinstance(existing_record, list) and len(existing_record) > 0:
+                existing_record = existing_record[0]
+            if isinstance(existing_record, list) and len(existing_record) > 0:
+                existing_record = existing_record[0]
+            if not isinstance(existing_record, dict):
+                existing_record = {}
+                    
+            print(f"🎯 Vault Hit! Returning cached SSOT for hash: {file_hash[:10]}...")
+            yield json.dumps({
+                "progress": 100,
+                "step": 4,
+                "message": "Vault Match Found!",
+                "result": {
+                    "status": "success",
+                    "source": "vault", 
+                    "filename": file.filename,
+                    "data": existing_record.get("syllabus_data", []),
+                    "golden_syllabus_id": existing_record.get("id") 
+                }
+            }) + "\n"
+            return
 
-    all_extracted_subjects = []
-    
-    for i, chunk in enumerate(subject_chunks):
+        # --- 3. THE EXPENSIVE PATH (Extraction & AI) ---
+        yield json.dumps({"progress": 20, "step": 1, "message": "Extracting text with PDFPlumber..."}) + "\n"
         try:
-            print(f"⚙️ Sending Subject Chunk {i+1}/{len(subject_chunks)} to Gemini...")
-            ai_response = await generate_syllabus_json(chunk)
+            print("📄 Vault Miss. Starting pdfplumber extraction...")
+            clean_text = await extract_and_clean_pdf(file_bytes)
             
-            if ai_response and ai_response.subject_name:
-                # model_dump converts the Pydantic object to a standard Python dict
-                all_extracted_subjects.append(ai_response.model_dump())
-                print(f"✅ Successfully extracted: {ai_response.subject_name}")
-            
-            if i < len(subject_chunks) - 1:
-                await asyncio.sleep(4.5)
-                
+            print("✂️ Text cleaned. Splitting into subjects...")
+            subject_chunks = split_into_subjects(clean_text)
+            print(f"✅ Found {len(subject_chunks)} chunks.")
         except Exception as e:
-            print(f"❌ Failed to parse chunk {i+1}. Error: {e}")
+            yield json.dumps({"error": f"PDF Parsing Error: {str(e)}"}) + "\n"
+            return
 
-    # --- 4. PERSISTENCE (Saving the Draft) ---
-    valid_subjects = [sub for sub in all_extracted_subjects if len(sub.get("modules", [])) > 0]
-
-    if not valid_subjects:
-         raise HTTPException(status_code=422, detail="AI failed to extract structured subjects.")
-
-    try:
-        draft_record = db.create_draft_syllabus(
-            file_hash=file_hash,
-            syllabus_json=valid_subjects,
-            department_code=department_code,
-            user_id=None 
-        )
-        print(f"💾 New Syllabus Draft ({department_code}) saved to Supabase!")
+        all_extracted_subjects = []
+        total = len(subject_chunks)
         
-        # 🛡️ THE ULTIMATE ID EXTRACTOR
-        golden_id = None
-        if hasattr(draft_record, 'data') and isinstance(draft_record.data, list) and len(draft_record.data) > 0:
-            row_data = draft_record.data
-            if isinstance(row_data, dict):
-                golden_id = row_data.get('id')
-            elif isinstance(row_data, list) and len(row_data) > 0 and isinstance(row_data, dict):
-                golden_id = row_data.get('id')
+        for i, chunk in enumerate(subject_chunks):
+            current_prog = 30 + int((i / total) * 55)
+            yield json.dumps({"progress": current_prog, "step": 2, "message": f"Structuring module {i+1} of {total} with AI..."}) + "\n"
+            
+            try:
+                print(f"⚙️ Sending Subject Chunk {i+1}/{total} to Gemini...")
+                ai_response = await generate_syllabus_json(chunk)
                 
-    except Exception as db_err:
-        print(f"⚠️ Database Save Error: {db_err}")
-        golden_id = None
+                if ai_response and getattr(ai_response, 'subjects', None):
+                    for subj in ai_response.subjects:
+                        if subj.subject_name:
+                            all_extracted_subjects.append(subj.model_dump())
+                            print(f"✅ Successfully extracted: {subj.subject_name}")
+                
+                if i < total - 1:
+                    await asyncio.sleep(4.5)
+            except Exception as e:
+                print(f"❌ Failed to parse chunk {i+1}. Error: {e}")
+                
+        # --- 4. PERSISTENCE (Saving the Draft) ---
+        yield json.dumps({"progress": 90, "step": 3, "message": "Merging chunks and finalizing schema..."}) + "\n"
+        
+        # 🚨 NEW: Merge the duplicated chunks into a clean, flat list
+        merged_subjects_data = merge_syllabus_chunks(all_extracted_subjects)
 
-    return {
-        "status": "success",
-        "source": "ai_inference", 
-        "filename": file.filename,
-        "total_subjects_found": len(valid_subjects),
-        "data": valid_subjects,
-        "golden_syllabus_id": golden_id
-    }   
+        # 🚨 UPDATED: Validate the merged data instead of the raw extracted data
+        valid_subjects = [sub for sub in merged_subjects_data if len(sub.get("modules", [])) > 0]
+        
+        if not valid_subjects:
+            yield json.dumps({"error": "AI failed to extract structured subjects."}) + "\n"
+            return
+
+        try:
+            # Save the CLEANED, MERGED subjects to the database
+            draft_record = db.create_draft_syllabus(
+                file_hash=file_hash,
+                syllabus_json=valid_subjects,
+                department_code=department_code,
+                user_id=None 
+            )
+            print(f"💾 New Syllabus Draft ({department_code}) saved to Supabase!")
+            
+            # ... (Rest of your existing golden_id extraction and yield block remains identical) ...
+            golden_id = None
+            if hasattr(draft_record, 'data') and isinstance(draft_record.data, list) and len(draft_record.data) > 0:
+                row_data = draft_record.data
+                if isinstance(row_data, dict):
+                    golden_id = row_data.get('id')
+                elif isinstance(row_data, list) and len(row_data) > 0 and isinstance(row_data[0], dict):
+                    golden_id = row_data[0].get('id')
+        except Exception as db_err:
+            print(f"⚠️ Database Save Error: {db_err}")
+            golden_id = None
+
+        yield json.dumps({
+            "progress": 100,
+            "step": 4,
+            "message": "Generation Complete!",
+            "result": {
+                "status": "success",
+                "source": "ai_inference", 
+                "filename": file.filename,
+                "total_subjects_found": len(valid_subjects),
+                "data": valid_subjects,
+                "golden_syllabus_id": golden_id
+            }
+        }) + "\n"
+
+    return StreamingResponse(process_stream(), media_type="application/x-ndjson")   
 
 
 @router.post("/refine")

@@ -22,7 +22,8 @@ def get_syllabus_chain():
         api_key=api_key
     )
 
-    structured_llm = llm.with_structured_output(SyllabusResponse)
+    from schemas.syllabus import SyllabusCollection
+    structured_llm = llm.with_structured_output(SyllabusCollection)
     syllabus_prompt = get_syllabus_extraction_prompt()
 
     return syllabus_prompt | structured_llm
@@ -31,6 +32,43 @@ async def generate_syllabus_json(clean_text: str):
     chain = get_syllabus_chain()
     return await chain.ainvoke({"text": clean_text})
 
+# Add this inside backend/services/llm_service.py, right after generate_syllabus_json
+
+def merge_syllabus_chunks(chunk_responses: list[dict]) -> list[dict]:
+    """
+    Merges duplicate dictionary SyllabusResponse objects into a unified list.
+    Safeguards against overlapping chunks common in university syllabus PDFs.
+    """
+    merged_subjects = {}
+
+    for syllabus_dict in chunk_responses:
+        # Failsafe if Gemini hallucinated an empty response
+        if not syllabus_dict or not syllabus_dict.get('subject_name'):
+            continue
+            
+        subject_name = syllabus_dict.get('subject_name').strip()
+        
+        if subject_name not in merged_subjects:
+            # First time seeing this subject -> Initialize
+            merged_subjects[subject_name] = {
+                "id": subject_name.lower().replace(" ", "-"), 
+                "subject_name": subject_name,
+                "semester": syllabus_dict.get('semester'),
+                "modules": list(syllabus_dict.get('modules', []))
+            }
+        else:
+            # Duplicate chunk -> Merge modules, avoiding exact duplicates
+            existing_module_titles = {
+                m.get("title", "").lower().strip() 
+                for m in merged_subjects[subject_name]["modules"]
+            }
+            
+            for mod in syllabus_dict.get('modules', []):
+                mod_title = mod.get("title", "").lower().strip()
+                if mod_title and mod_title not in existing_module_titles:
+                    merged_subjects[subject_name]["modules"].append(mod)
+
+    return list(merged_subjects.values())
 # ==========================================
 # 2. Inference Pipeline (Verified JSON -> Prerequisites)
 # ==========================================
@@ -79,7 +117,7 @@ def get_adaptive_quiz_chain():
     # Temperature 0.4 allows for creative distractors and question variety 
     # without breaking the strict Pydantic JSON structure.
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.1-flash-lite-preview", 
+        model="gemini-3-flash-preview", 
         temperature=0.2, 
         api_key=api_key
     )

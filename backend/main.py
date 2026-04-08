@@ -12,7 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 # Import routers
-from api.routers import syllabus, quiz
+from api.routers import syllabus, quiz, user
 
 app = FastAPI(title="ASCEND API", version="1.0")
 
@@ -41,6 +41,7 @@ app.add_middleware(
 # ==========================================
 app.include_router(syllabus.router)
 app.include_router(quiz.router)
+app.include_router(user.router)
 
 @app.get("/")
 def root():
