@@ -161,6 +161,7 @@ export default function KnowledgeGraphPage() {
                     mastery_score,
                     mastery_state,
                     order_index: modIdx * 100 + topicIdx,
+                    plan_id: currentSubject.plan_id
                 } as ConceptCluster
             })
         )

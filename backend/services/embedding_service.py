@@ -18,9 +18,9 @@ class EmbeddingEngine:
             if not api_key:
                 raise ValueError("🚨 GOOGLE_API_KEY missing for EmbeddingEngine")
                 
-            # We use text-embedding-004 for SOTA performance on the free tier
+            # We use models/embedding-001 for universal compatibility
             cls._instance.model = GoogleGenerativeAIEmbeddings(
-                model="models/text-embedding-004",
+                model="models/gemini-embedding-001",
                 google_api_key=api_key
             )
         return cls._instance
