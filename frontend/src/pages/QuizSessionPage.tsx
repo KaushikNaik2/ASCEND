@@ -29,12 +29,18 @@ export default function QuizSessionPage() {
     const [timerActive, setTimerActive] = useState(false)
     const timerRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
+    // Debug: log what params we received
+    console.log('[QuizSession] Params:', { userId: user?.id, topic, planId })
+
     useEffect(() => {
         async function loadQuiz() {
-            if (!user?.id || !topic || !planId) return
+            if (!user?.id || !topic || !planId) {
+                console.warn('[QuizSession] Missing params, skipping API call')
+                setIsLoading(false)
+                return
+            }
 
             setIsLoading(true)
-            // If it takes more than 1 second, it's likely hitting the LLM fallback
             const loaderTimeout = setTimeout(() => setIsGenerating(true), 1500)
 
             try {
@@ -42,7 +48,7 @@ export default function QuizSessionPage() {
                 setQuestions(response.questions)
                 setSource(response.source)
                 setAnswers(Array(response.questions.length).fill(null))
-                setTimerActive(true) // Start timer only after loading
+                setTimerActive(true)
             } catch (err) {
                 console.error("Failed to load adaptive quiz", err)
             } finally {
@@ -101,7 +107,7 @@ export default function QuizSessionPage() {
 
     const handleNext = () => {
         if (isLast) {
-            navigate('/quiz/session-1/results', { state: { answers, questions } })
+            navigate('/quiz/session-1/results', { state: { answers, questions, topic, planId } })
             return
         }
         setCurrentIndex(i => i + 1)
@@ -150,11 +156,20 @@ export default function QuizSessionPage() {
     if (!questions.length) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center p-6 relative z-10">
-                <CircleAlert className="w-12 h-12 text-red-400 mb-4" />
-                <h2 className="text-2xl font-bold text-white mb-2">Unable to Load Quiz</h2>
-                <p className="text-slate-400 mb-6">We could not generate questions for this topic.</p>
-                <button onClick={() => navigate(-1)} className="px-6 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-white font-medium transition-colors">
-                    Go Back
+                <CircleAlert className="w-12 h-12 text-amber-400 mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">
+                    {!topic ? 'No Topic Selected' : 'Unable to Load Quiz'}
+                </h2>
+                <p className="text-slate-400 mb-6 text-center max-w-md">
+                    {!topic
+                        ? 'Navigate to a Roadmap and click a topic to start an adaptive quiz.'
+                        : 'We could not generate questions for this topic. Please try again.'}
+                </p>
+                <button
+                    onClick={() => navigate('/roadmaps')}
+                    className="px-6 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 rounded-xl text-indigo-300 font-medium transition-colors"
+                >
+                    Go to Roadmaps
                 </button>
             </div>
         )

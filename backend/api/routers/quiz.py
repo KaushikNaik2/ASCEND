@@ -50,56 +50,38 @@ async def get_adaptive_quiz(
         
         print(f"🎯 Target Difficulty for '{topic_name}' is {target_difficulty} (Current: {current_score})")
 
-        # 2. Vector Magic: Embed the topic string
-        topic_embedding = await embedder.get_embedding(topic_name)
-        
-        # 3. Search Supabase via our custom RPC!
-        response = db.client.rpc(
-            "match_quiz_questions",
-            {
-                "query_embedding": topic_embedding,
-                "match_threshold": 0.70, # Has to be somewhat related
-                "match_count": 10,
-                "target_difficulty": target_difficulty
-            }
-        ).execute()
+        # 2. Try Vector Search (gracefully skip if embedding model unavailable)
+        questions = []
+        try:
+            topic_embedding = await embedder.get_embedding(topic_name)
+            response = db.client.rpc(
+                "match_quiz_questions",
+                {
+                    "query_embedding": topic_embedding,
+                    "match_threshold": 0.70,
+                    "match_count": 10,
+                    "target_difficulty": target_difficulty
+                }
+            ).execute()
+            questions = response.data if hasattr(response, 'data') else []
+            print(f"📡 Vector DB returned {len(questions)} matching questions.")
+        except Exception as vec_err:
+            print(f"⚠️ Vector search skipped (embedding unavailable): {vec_err}")
+            questions = []
 
-        questions = response.data if hasattr(response, 'data') else []
-        print(f"📡 Vector DB returned {len(questions)} matching questions.")
-
-        # 4. RAG Fallback: Seed the database via LLM if cache is empty
+        # 3. LLM Fallback: Generate fresh questions via Gemini
         if not questions or len(questions) < 5:
-            print("⚠️ Insufficient RAG cache. Falling back to Gemini to generate new questions...")
+            print("🤖 Generating fresh questions via Gemini...")
             
-            # Use Gemini to generate brand new questions targeting this topic and exact difficulty
             quiz_response = await generate_adaptive_quiz(
-                user_proficiency_map={topic_name: current_score}, # Force prompt to use this
+                user_proficiency_map={topic_name: current_score},
                 target_topics_md=topic_name,
                 num_questions=10
             )
 
             new_questions = quiz_response.questions
             
-            # Fetch Syllabus ID from the Plan to properly log the questions
-            plan_details = db.get_plan_details(plan_id)
-            syllabus_id = plan_details.get("golden_syllabus_id") if plan_details else None
-
-            if syllabus_id:
-                # Embed and save the new questions for the future!
-                # We calculate embeddings in parallel heavily accelerating the flow
-                for q in new_questions:
-                    try:
-                        q_embed = await embedder.get_embedding(q.question_text)
-                        db.save_quiz_question_vector(
-                            syllabus_id=syllabus_id,
-                            question_data=q.model_dump(),
-                            embedding=q_embed
-                        )
-                    except Exception as embed_e:
-                        print(f"⚠️ Failed to embed/save question: {embed_e}")
-                print(f"💾 Saved {len(new_questions)} new questions to pgvector!")
-            
-            # Map LLM response schemas to look exactly like the DB response schema
+            # Map LLM response to unified schema
             mapped_responses = []
             for i, q in enumerate(new_questions):
                 mapped_responses.append({
@@ -115,9 +97,11 @@ async def get_adaptive_quiz(
                     },
                     "primary_concept": q.primary_concept
                 })
+            
+            print(f"✅ Generated {len(mapped_responses)} questions from Gemini!")
             return {"questions": mapped_responses, "source": "gemini"}
 
-        # 5. Perfect RAG hit: Return DB questions
+        # 4. Perfect RAG hit: Return DB questions
         return {"questions": questions, "source": "vector_db"}
 
     except Exception as e:
@@ -125,8 +109,6 @@ async def get_adaptive_quiz(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-from core.scoring import scorer
-from services.database_service import db
 
 class QuizSubmission(BaseModel):
     user_id: str
@@ -155,6 +137,10 @@ async def submit_quiz_answer(payload: QuizSubmission):
     # 3. Check for Mastery Flag (0.90 Threshold)
     is_mastered = new_score >= 0.90
 
+    # Resolve the true subject_id (golden_syllabus_id) from the plan_id
+    plan_details = db.get_plan_details(payload.subject_id)
+    actual_subject_id = plan_details.get("golden_syllabus_id") if plan_details else payload.subject_id
+
     # 4. Persistence: Update the DB
     try:
         db.update_user_proficiency(
@@ -162,14 +148,34 @@ async def submit_quiz_answer(payload: QuizSubmission):
             topic_name=payload.topic_name,
             new_score=new_score,
             is_mastered=is_mastered,
-            subject_id=payload.subject_id
+            subject_id=actual_subject_id
         )
+        
+        # 5. Auto-sync progress_state on the roadmap so Knowledge Graph updates!
+        if new_score >= 0.90:
+            progress_status = "done"
+        elif new_score >= 0.3:
+            progress_status = "ongoing"
+        else:
+            progress_status = "pending"
+        
+        try:
+            db.update_topic_status(
+                user_id=payload.user_id,
+                plan_id=payload.subject_id,  # subject_id is actually plan_id from frontend
+                topic_title=payload.topic_name,
+                status=progress_status
+            )
+            print(f"📊 Progress synced: '{payload.topic_name}' → {progress_status} (score: {new_score:.2f})")
+        except Exception as sync_err:
+            print(f"⚠️ Progress sync failed (non-fatal): {sync_err}")
         
         return {
             "status": "updated",
             "old_score": current_score,
             "new_score": new_score,
-            "mastery_achieved": is_mastered
+            "mastery_achieved": is_mastered,
+            "progress_status": progress_status
         }
     except Exception as e:
         print(f"❌ DB Update Error: {e}")

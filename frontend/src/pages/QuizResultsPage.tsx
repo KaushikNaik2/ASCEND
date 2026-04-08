@@ -7,13 +7,15 @@ import type { QuizQuestion } from '../types'
 interface LocationState {
     answers: (number | null)[]
     questions: QuizQuestion[]
+    topic: string
+    planId: string
 }
 
-const VECTOR_DELTAS = [
-    { label: 'Recursion Basics', before: 0.45, after: 0.62 },
-    { label: 'Memoization', before: 0.22, after: 0.38 },
-    { label: 'Tree Traversal', before: 0.30, after: 0.41 },
-]
+interface VectorDelta {
+    label: string
+    before: number
+    after: number
+}
 
 export default function QuizResultsPage() {
     const navigate = useNavigate()
@@ -22,12 +24,41 @@ export default function QuizResultsPage() {
 
     const questions: QuizQuestion[] = state?.questions ?? []
     const answers: (number | null)[] = state?.answers ?? []
+    const topic = state?.topic ?? 'Unknown Topic'
+    const planId = state?.planId ?? ''
 
     const score = answers.reduce<number>((acc, ans, i) =>
         ans === questions[i]?.correct_index ? acc + 1 : acc, 0)
-    const total = questions.length || 5
+    const total = questions.length || 1
     const pct = Math.round((score / total) * 100)
     const xpEarned = score * 20 + (pct === 100 ? 50 : 0)
+
+    // Compute REAL vector deltas from quiz answers
+    const vectorDeltas: VectorDelta[] = (() => {
+        // Group questions by their concept cluster
+        const conceptMap = new Map<string, { correct: number; total: number; avgDiff: number }>()
+
+        questions.forEach((q, i) => {
+            const concept = q.cluster_id || topic
+            const entry = conceptMap.get(concept) || { correct: 0, total: 0, avgDiff: 0 }
+            entry.total += 1
+            entry.avgDiff += q.difficulty
+            if (answers[i] === q.correct_index) entry.correct += 1
+            conceptMap.set(concept, entry)
+        })
+
+        return Array.from(conceptMap.entries()).map(([label, data]) => {
+            // Estimate before score based on difficulty (lower difficulty = higher assumed prior knowledge)
+            const avgDiff = data.avgDiff / data.total
+            const before = Math.max(0.05, Math.min(0.5, (1 - avgDiff) * 0.6))
+            // After score = before + performance delta
+            const performanceRatio = data.correct / data.total
+            const delta = performanceRatio * 0.25 // Max +25% per quiz session
+            const after = Math.min(1.0, before + delta)
+
+            return { label, before: Math.round(before * 100) / 100, after: Math.round(after * 100) / 100 }
+        })
+    })()
 
     const [animatedPct, setAnimatedPct] = useState(0)
     const [xpAnim, setXpAnim] = useState(0)
@@ -63,7 +94,7 @@ export default function QuizResultsPage() {
                     <h1 className={`text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r ${grade.color} mb-1`}>
                         {grade.label}
                     </h1>
-                    <p className="text-slate-500 text-sm mb-8">Recursion &amp; Backtracking · {total} questions</p>
+                    <p className="text-slate-500 text-sm mb-8">{topic} · {total} questions</p>
 
                     {/* Radial score */}
                     <div className="relative w-32 h-32 mx-auto mb-6">
@@ -133,8 +164,8 @@ export default function QuizResultsPage() {
                     </motion.div>
                 )}
 
-                {/* ── Vector delta ── */}
-                {showDeltas && (
+                {/* ── Vector delta (DYNAMIC) ── */}
+                {showDeltas && vectorDeltas.length > 0 && (
                     <motion.div
                         initial={{ opacity: 0, y: 15 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -144,19 +175,19 @@ export default function QuizResultsPage() {
                             <TrendingUp className="w-4 h-4 text-emerald-400" /> Knowledge Vector Updated
                         </h2>
                         <div className="space-y-4">
-                            {VECTOR_DELTAS.map((d, i) => {
+                            {vectorDeltas.map((d, i) => {
                                 const delta = Math.round((d.after - d.before) * 100)
                                 return (
                                     <div key={i}>
                                         <div className="flex justify-between items-center mb-1.5">
                                             <span className="text-sm text-slate-300">{d.label}</span>
-                                            <span className="text-xs font-bold text-emerald-400">+{delta}%</span>
+                                            <span className={`text-xs font-bold ${delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                                {delta > 0 ? '+' : ''}{delta}%
+                                            </span>
                                         </div>
                                         <div className="flex gap-2 items-center">
                                             <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden relative">
-                                                {/* Before */}
                                                 <div className="absolute h-full rounded-full bg-slate-600" style={{ width: `${d.before * 100}%` }} />
-                                                {/* After */}
                                                 <motion.div
                                                     initial={{ width: `${d.before * 100}%` }}
                                                     animate={{ width: `${d.after * 100}%` }}
@@ -181,7 +212,7 @@ export default function QuizResultsPage() {
                     className="flex flex-col sm:flex-row gap-3"
                 >
                     <button
-                        onClick={() => navigate('/quiz/c3')}
+                        onClick={() => navigate(`/quiz/session?topic=${encodeURIComponent(topic)}&plan_id=${planId}`)}
                         className="flex-1 py-3.5 rounded-2xl border border-white/10 bg-white/5 text-white font-semibold flex items-center justify-center gap-2 hover:bg-white/10 transition-all"
                     >
                         <RotateCcw className="w-4 h-4" /> Retake Quiz

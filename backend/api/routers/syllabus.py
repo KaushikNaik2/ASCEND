@@ -9,7 +9,7 @@ import json
 
 # Updated Imports
 from services.pdf_service import extract_and_clean_pdf, split_into_subjects, calculate_file_hash
-from services.llm_service import generate_syllabus_json
+from services.llm_service import generate_syllabus_json,merge_syllabus_chunks
 from services.database_service import db
 
 # Imports for Refinement Endpoint
