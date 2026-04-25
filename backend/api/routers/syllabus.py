@@ -12,10 +12,11 @@ from services.pdf_service import extract_and_clean_pdf, split_into_subjects, cal
 from services.llm_service import generate_syllabus_json,merge_syllabus_chunks
 from services.database_service import db
 
-# Imports for Refinement Endpoint
-from core.templates import get_refinement_prompt
+# Imports for Refinement & Mapping Endpoints
+from core.templates import get_refinement_prompt, get_syllabus_mapping_prompt
 from langchain_google_genai import ChatGoogleGenerativeAI
-from schemas.syllabus import Module 
+from schemas.syllabus import Module
+from schemas.mapping import SyllabusMappingResponse
 
 router = APIRouter(
     prefix="/syllabus",
@@ -237,3 +238,109 @@ async def confirm_syllabus(payload: ConfirmSyllabusRequest):
     except Exception as e:
         print(f"❌ Confirmation Error: {e}")
         raise HTTPException(status_code=500, detail="Confirmation Failed. Could not save to database.")
+
+
+# ==========================================
+# 4. MAPPING MODE (Scope Detector)
+# ==========================================
+
+class MappingRequest(BaseModel):
+    department_code: str = Field("Unknown", description="Department code to filter Truth Layer concepts.")
+
+@router.post("/map")
+async def map_syllabus(
+    file: UploadFile = File(...),
+    department_code: str = Form("Unknown")
+):
+    """
+    Mapping Mode: Extracts text from an uploaded PDF, then maps each
+    topic to the pre-existing Truth Layer (concept_clusters) instead
+    of creating new content. The LLM acts as a Scope Detector.
+    """
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Invalid file type. Only PDFs are allowed.")
+
+    # 1. Read and validate PDF
+    MAX_SIZE = 5 * 1024 * 1024
+    CHUNK_SIZE = 1024 * 1024
+    
+    first_chunk = await file.read(CHUNK_SIZE)
+    if not first_chunk.startswith(b"%PDF"):
+        raise HTTPException(status_code=400, detail="Security Error: File is not a genuine PDF.")
+    
+    file_bytes = first_chunk
+    while chunk := await file.read(CHUNK_SIZE):
+        file_bytes += chunk
+        if len(file_bytes) > MAX_SIZE:
+            raise HTTPException(status_code=413, detail="Payload Too Large: File exceeds 5MB limit.")
+
+    async def mapping_stream():
+        # 2. Extract text
+        yield json.dumps({"progress": 10, "step": 0, "message": "Extracting text from PDF..."}) + "\n"
+        try:
+            from services.pdf_service import extract_and_clean_pdf
+            clean_text = await extract_and_clean_pdf(file_bytes)
+        except Exception as e:
+            yield json.dumps({"error": f"PDF Parsing Error: {str(e)}"}) + "\n"
+            return
+
+        # 3. Fetch Truth Layer concepts from Supabase
+        yield json.dumps({"progress": 30, "step": 1, "message": "Loading Truth Layer concepts..."}) + "\n"
+        try:
+            response = db.client.table("concept_clusters").select(
+                "concept_name, subject, branch, semester, difficulty_tier"
+            ).execute()
+            truth_concepts = response.data if hasattr(response, 'data') else []
+        except Exception as e:
+            yield json.dumps({"error": f"Failed to load Truth Layer: {str(e)}"}) + "\n"
+            return
+
+        if not truth_concepts:
+            yield json.dumps({"error": "Truth Layer is empty. Run seed_mu_graph.py first."}) + "\n"
+            return
+
+        # 4. Build known concepts string for the prompt
+        known_concepts_md = "\n".join([
+            f"- {c['concept_name']} [{c['subject']} | Sem {c['semester']} | {c['difficulty_tier']}]"
+            for c in truth_concepts
+        ])
+
+        # 5. Run the Scope Detector LLM
+        yield json.dumps({"progress": 50, "step": 2, "message": "Running Scope Detector AI..."}) + "\n"
+        try:
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                yield json.dumps({"error": "Missing GOOGLE_API_KEY."}) + "\n"
+                return
+
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-3.1-flash-lite-preview",
+                temperature=0.1,
+                api_key=api_key,
+            )
+            structured_llm = llm.with_structured_output(SyllabusMappingResponse)
+            mapping_prompt = get_syllabus_mapping_prompt()
+            chain = mapping_prompt | structured_llm
+
+            mapping_result = await chain.ainvoke({
+                "known_concepts": known_concepts_md,
+                "text": clean_text,
+            })
+        except Exception as e:
+            yield json.dumps({"error": f"Mapping AI Error: {str(e)}"}) + "\n"
+            return
+
+        # 6. Return mapping results
+        yield json.dumps({
+            "progress": 100,
+            "step": 3,
+            "message": "Mapping Complete!",
+            "result": {
+                "status": "success",
+                "source": "scope_detector",
+                "filename": file.filename,
+                "mapping": mapping_result.model_dump() if mapping_result else {},
+            }
+        }) + "\n"
+
+    return StreamingResponse(mapping_stream(), media_type="application/x-ndjson")

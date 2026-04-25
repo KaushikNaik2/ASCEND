@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Dict, List, Optional
-from services.llm_service import generate_adaptive_quiz
+from services.llm_service import generate_adaptive_quiz  # Used by legacy /generate endpoint
 from services.database_service import db
 from services.embedding_service import embedder
 from core.scoring import scorer
@@ -40,7 +40,9 @@ async def generate_quiz(payload: QuizGenerationRequest):
 async def get_adaptive_quiz(
     user_id: str = Query(..., description="ID of the user taking the quiz"),
     plan_id: str = Query(..., description="ID of the user study plan"),
-    topic_name: str = Query(..., description="The name of the target topic")
+    topic_name: str = Query(..., description="The name of the target topic"),
+    subject_id: str = Query(None, description="Filter by subject (e.g., 'data-structures-algorithms')"),
+    branch_name: str = Query(None, description="Filter by branch ('Core', 'Computing', 'Specialized')"),
 ):
     try:
         # 1. Math computation: Get current score, aim for the sweet spot (+0.15)
@@ -50,18 +52,25 @@ async def get_adaptive_quiz(
         
         print(f"🎯 Target Difficulty for '{topic_name}' is {target_difficulty} (Current: {current_score})")
 
-        # 2. Try Vector Search (gracefully skip if embedding model unavailable)
+        # 2. Try Vector Search with structured filters
         questions = []
         try:
             topic_embedding = await embedder.get_embedding(topic_name)
+            rpc_params = {
+                "query_embedding": topic_embedding,
+                "match_threshold": 0.70,
+                "match_count": 10,
+                "target_difficulty": target_difficulty,
+            }
+            # Pass structured filters if provided
+            if subject_id:
+                rpc_params["filter_subject_id"] = subject_id
+            if branch_name:
+                rpc_params["filter_branch_name"] = branch_name
+
             response = db.client.rpc(
                 "match_quiz_questions",
-                {
-                    "query_embedding": topic_embedding,
-                    "match_threshold": 0.70,
-                    "match_count": 10,
-                    "target_difficulty": target_difficulty
-                }
+                rpc_params
             ).execute()
             questions = response.data if hasattr(response, 'data') else []
             print(f"📡 Vector DB returned {len(questions)} matching questions.")
@@ -69,39 +78,15 @@ async def get_adaptive_quiz(
             print(f"⚠️ Vector search skipped (embedding unavailable): {vec_err}")
             questions = []
 
-        # 3. LLM Fallback: Generate fresh questions via Gemini
+        # 3. Pre-populated DB is the ONLY source of questions
+        #    (Run `python -m scripts.batch_gen` to populate)
         if not questions or len(questions) < 5:
-            print("🤖 Generating fresh questions via Gemini...")
-            
-            quiz_response = await generate_adaptive_quiz(
-                user_proficiency_map={topic_name: current_score},
-                target_topics_md=topic_name,
-                num_questions=10
+            raise HTTPException(
+                status_code=404,
+                detail=f"Insufficient questions for '{topic_name}'. Run batch_gen.py to populate the question bank."
             )
 
-            new_questions = quiz_response.questions
-            
-            # Map LLM response to unified schema
-            mapped_responses = []
-            for i, q in enumerate(new_questions):
-                mapped_responses.append({
-                    "id": f"llm-gen-{i}",
-                    "question_text": q.question_text,
-                    "options": [opt.model_dump() for opt in q.options],
-                    "correct_option": q.correct_option,
-                    "explanation": q.explanation,
-                    "metadata": {
-                        "difficulty": q.difficulty_level,
-                        "format": q.question_format,
-                        "bloom": q.blooms_taxonomy_level
-                    },
-                    "primary_concept": q.primary_concept
-                })
-            
-            print(f"✅ Generated {len(mapped_responses)} questions from Gemini!")
-            return {"questions": mapped_responses, "source": "gemini"}
-
-        # 4. Perfect RAG hit: Return DB questions
+        # 4. Return matched questions from pre-populated DB
         return {"questions": questions, "source": "vector_db"}
 
     except Exception as e:
