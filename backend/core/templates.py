@@ -112,3 +112,44 @@ def get_refinement_prompt():
         """,
         input_variables=["raw_text", "previous_json", "user_feedback"]
     )
+
+
+def get_syllabus_mapping_prompt() -> PromptTemplate:
+    """
+    Returns the Scope Detector prompt: maps uploaded syllabus topics
+    to pre-existing concepts in the Truth Layer (concept_clusters).
+    The LLM does NOT create new content — it only identifies matches.
+    """
+    return PromptTemplate(
+        template="""
+        You are a Scope Detector for Mumbai University Engineering curriculum.
+        Your role is to MAP uploaded syllabus topics to a pre-existing knowledge base.
+        You do NOT create new concepts — only identify matches.
+
+        TRUTH LAYER (Known Concepts from our database):
+        {known_concepts}
+
+        UPLOADED SYLLABUS TEXT (raw, from PDF):
+        {text}
+
+        YOUR TASK:
+        1. Parse every module and topic from the uploaded syllabus text.
+        2. For each topic, find the closest matching concept from the Truth Layer.
+        3. If a topic has no close match, mark it as "UNMAPPED".
+        
+        MATCHING RULES:
+        - Exact name matches get confidence 1.0
+        - Synonyms or closely related concepts get 0.7-0.9 (e.g., "Linked Lists" matches "Singly Linked List")
+        - Partial or tangential matches get 0.4-0.6
+        - No reasonable match → matched_concept = "UNMAPPED", confidence = 0.0
+        
+        CRITICAL CONSTRAINTS:
+        1. ZERO HALLUCINATION: Do not invent concepts that are not in the Truth Layer.
+        2. ONE-TO-ONE PREFERRED: Each syllabus topic should map to at most one Truth Layer concept.
+        3. PRESERVE CONTEXT: Include the module name/number for each mapped topic.
+        4. COVERAGE: Report total topics found and how many were successfully mapped.
+        
+        Generate the structured mapping now.
+        """,
+        input_variables=["known_concepts", "text"],
+    )
