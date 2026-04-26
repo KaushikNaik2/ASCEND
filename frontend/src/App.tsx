@@ -1,10 +1,13 @@
+import { Suspense, lazy } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
 import { AnimatePresence } from 'framer-motion'
-import KnowledgeConstellation from './components/canvas/KnowledgeConstellation'
+import CanvasErrorBoundary from './components/canvas/CanvasErrorBoundary'
 import CustomCursor from './components/ui/CustomCursor'
 import Header from './components/layout/Header'
+import './App.css'
+
+// Lazy-load the heavy 3D background so it doesn't block initial render
+const ThreeBackground = lazy(() => import('./components/canvas/ThreeBackground'))
 
 // Pages
 import LandingPage from './pages/LandingPage'
@@ -23,6 +26,18 @@ import LeaderboardPage from './pages/LeaderboardPage'
 import ProfilePage from './pages/ProfilePage'
 import { useStore } from './store/useStore'
 
+/** Static gradient fallback when 3D Canvas is loading or unavailable */
+function BackgroundFallback() {
+  return (
+    <div
+      className="fixed inset-0 z-0"
+      style={{
+        background: 'radial-gradient(ellipse at 50% 30%, #1e293b 0%, #0f172a 70%)',
+      }}
+    />
+  )
+}
+
 function App() {
   const location = useLocation()
   const { sceneState } = useStore()
@@ -38,21 +53,12 @@ function App() {
   return (
     <div className="relative w-screen min-h-screen bg-slate-950 text-slate-50 font-sans overflow-x-hidden">
       <CustomCursor />
-      {/* 3D Background Layer */}
-      <div className="fixed inset-0 z-0">
-        <Canvas camera={{ position: [0, 0, 15], fov: 50 }}>
-          <color attach="background" args={['#0f172a']} />
-          <KnowledgeConstellation appState={currentSceneState as any} />
-          <OrbitControls
-            enableZoom={false}
-            enablePan={false}
-            autoRotate
-            autoRotateSpeed={0.5}
-            maxPolarAngle={Math.PI / 1.5}
-            minPolarAngle={Math.PI / 3}
-          />
-        </Canvas>
-      </div>
+      {/* 3D Background Layer — wrapped in error boundary so a WebGL crash doesn't kill the app */}
+      <CanvasErrorBoundary fallback={<BackgroundFallback />}>
+        <Suspense fallback={<BackgroundFallback />}>
+          <ThreeBackground appState={currentSceneState as any} />
+        </Suspense>
+      </CanvasErrorBoundary>
 
       {/* UI Overlay Layer */}
       <div className="relative z-10 w-full min-h-screen flex flex-col pointer-events-none">

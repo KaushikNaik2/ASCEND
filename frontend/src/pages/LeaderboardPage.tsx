@@ -41,9 +41,10 @@ function PodiumCard({ entry, position }: { entry: LeaderboardEntry; position: 0 
     const heights = ['pb-16', 'pb-10', 'pb-6']
     return (
         <motion.div
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: position * 0.1 }}
+            transition={{ delay: position * 0.12, type: 'spring', stiffness: 260, damping: 20 }}
+            whileHover={{ y: -4 }}
             className={`flex flex-col items-center ${position === 0 ? 'order-2' : position === 1 ? 'order-1' : 'order-3'}`}
         >
             <div className={`w-12 h-12 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 border-2 flex items-center justify-center text-lg font-bold text-white mb-2 ${RANK_BG[position]} border-current`}>
@@ -127,12 +128,13 @@ export default function LeaderboardPage() {
                         {rest.map((e, i) => (
                             <motion.div
                                 key={e.user_id}
-                                initial={{ opacity: 0, x: -10 }}
+                                initial={{ opacity: 0, x: -15 }}
                                 animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: i * 0.05 }}
-                                className={`grid grid-cols-[2rem_1fr_auto_auto] gap-x-4 px-5 py-4 items-center border-b border-white/5 last:border-0 transition-colors ${e.is_current_user
-                                        ? 'bg-indigo-500/10 border-indigo-500/20'
-                                        : 'hover:bg-white/3'
+                                transition={{ delay: i * 0.04, type: 'spring', stiffness: 300, damping: 25 }}
+                                whileHover={{ backgroundColor: 'rgba(255,255,255,0.03)', x: 2 }}
+                                className={`grid grid-cols-[2rem_1fr_auto_auto] gap-x-4 px-5 py-4 items-center border-b border-white/5 last:border-0 transition-all duration-200 ${e.is_current_user
+                                    ? 'bg-indigo-500/10 border-indigo-500/20 shadow-[inset_0_0_20px_rgba(99,102,241,0.07)]'
+                                    : ''
                                     }`}
                             >
                                 <span className="text-slate-500 font-bold text-sm">{e.rank}</span>

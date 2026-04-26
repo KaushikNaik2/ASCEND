@@ -34,7 +34,7 @@ export default function OnboardingPage() {
             >
                 <div className="text-center mb-12">
                     <motion.div
-                        initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', delay: 0.1 }}
+                        initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', delay: 0.1, stiffness: 260, damping: 20 }}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-sm font-medium mb-6"
                     >
                         <Brain className="w-4 h-4" />
@@ -52,9 +52,9 @@ export default function OnboardingPage() {
                 <div className="grid md:grid-cols-2 gap-6">
                     {/* Academic */}
                     <motion.button
-                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.97 }}
                         onClick={handleAcademicSelect}
-                        className={`relative p-8 rounded-3xl border text-left transition-all overflow-hidden group cursor-pointer ${selectedTrack === 'academic'
+                        className={`relative p-8 rounded-3xl border text-left transition-all duration-300 overflow-hidden group cursor-pointer ${selectedTrack === 'academic'
                             ? 'border-blue-500/60 bg-blue-500/10 shadow-[0_0_40px_rgba(59,130,246,0.15)]'
                             : 'border-white/10 bg-white/5 hover:border-white/20'
                             }`}
@@ -79,9 +79,9 @@ export default function OnboardingPage() {
 
                     {/* FORGE — Disabled for Phase 2 */}
                     <motion.button
-                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                        whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.97 }}
                         onClick={handleForgeSelect}
-                        className="relative p-8 rounded-3xl border text-left transition-all overflow-hidden group cursor-pointer border-white/10 bg-white/5 hover:border-white/20 opacity-60"
+                        className="relative p-8 rounded-3xl border text-left transition-all duration-300 overflow-hidden group cursor-pointer border-white/10 bg-white/5 hover:border-white/20 opacity-60"
                     >
                         <div className="absolute top-0 right-0 w-40 h-40 bg-purple-500/20 blur-3xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
                         <div className="absolute top-4 right-4 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
@@ -104,10 +104,11 @@ export default function OnboardingPage() {
 
                 <div className="flex justify-end mt-8">
                     <motion.button
-                        whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
+                        whileHover={{ scale: 1.05, boxShadow: '0 0 50px rgba(99,102,241,0.5)' }}
+                        whileTap={{ scale: 0.95 }}
                         disabled={selectedTrack !== 'academic'}
                         onClick={handleContinue}
-                        className="px-8 py-4 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-bold text-base flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed shadow-[0_0_30px_rgba(99,102,241,0.3)] hover:shadow-[0_0_40px_rgba(99,102,241,0.5)] transition-all cursor-pointer"
+                        className="px-8 py-4 rounded-full bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-bold text-base flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed shadow-[0_0_30px_rgba(99,102,241,0.3)] hover:shadow-[0_0_50px_rgba(99,102,241,0.5)] transition-all duration-300 cursor-pointer"
                     >
                         Continue <ArrowRight className="w-5 h-5" />
                     </motion.button>

@@ -1,13 +1,29 @@
 import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, Link } from 'react-router-dom'
-import { Flame, Zap, Search, Grid3X3, List, Lock, Loader2 } from 'lucide-react'
+import { Flame, Zap, Search, Grid3X3, List, Lock, Loader2, LogIn } from 'lucide-react'
 import AssessmentDrawer from '../components/ui/AssessmentDrawer'
 import WeakTopicBanner from '../components/ui/WeakTopicBanner'
 import type { ConceptCluster, Track } from '../types'
 import { useStore } from '../store/useStore'
 import { getUserRoadmaps } from '../lib/api'
 import type { UserRoadmap } from '../lib/api'
+
+// ── Demo data for guests ──────────────────────────────────────────────────────
+const DEMO_CLUSTERS: ConceptCluster[] = [
+    { id: 'd1', label: 'Arrays & Strings', module_ref: 'Data Structures', bloom_depth: 'Understand', difficulty_avg: 2.5, mastery_score: 1.0, mastery_state: 'mastered', order_index: 1 },
+    { id: 'd2', label: 'Linked Lists', module_ref: 'Data Structures', bloom_depth: 'Apply', difficulty_avg: 3.0, mastery_score: 0.85, mastery_state: 'mastered', order_index: 2 },
+    { id: 'd3', label: 'Stacks & Queues', module_ref: 'Data Structures', bloom_depth: 'Apply', difficulty_avg: 3.0, mastery_score: 0.7, mastery_state: 'mastered', order_index: 3 },
+    { id: 'd4', label: 'Hash Tables', module_ref: 'Data Structures', bloom_depth: 'Analyze', difficulty_avg: 3.5, mastery_score: 0.5, mastery_state: 'in_progress', order_index: 4 },
+    { id: 'd5', label: 'Recursion', module_ref: 'Algorithms', bloom_depth: 'Apply', difficulty_avg: 4.0, mastery_score: 0.6, mastery_state: 'in_progress', order_index: 5 },
+    { id: 'd6', label: 'Binary Trees', module_ref: 'Data Structures', bloom_depth: 'Analyze', difficulty_avg: 4.0, mastery_score: 0.35, mastery_state: 'in_progress', order_index: 6 },
+    { id: 'd7', label: 'Sorting Algorithms', module_ref: 'Algorithms', bloom_depth: 'Understand', difficulty_avg: 3.0, mastery_score: 0.0, mastery_state: 'available', order_index: 7 },
+    { id: 'd8', label: 'Graph Traversal', module_ref: 'Algorithms', bloom_depth: 'Analyze', difficulty_avg: 4.5, mastery_score: 0.0, mastery_state: 'available', order_index: 8 },
+    { id: 'd9', label: 'Dynamic Programming', module_ref: 'Algorithms', bloom_depth: 'Analyze', difficulty_avg: 5.0, mastery_score: 0.0, mastery_state: 'available', order_index: 9 },
+    { id: 'd10', label: 'Greedy Algorithms', module_ref: 'Algorithms', bloom_depth: 'Apply', difficulty_avg: 3.5, mastery_score: 0.0, mastery_state: 'available', order_index: 10 },
+    { id: 'd11', label: 'Heaps & Priority Queues', module_ref: 'Data Structures', bloom_depth: 'Apply', difficulty_avg: 4.0, mastery_score: 0.0, mastery_state: 'locked', order_index: 11 },
+    { id: 'd12', label: 'Tries & Advanced Trees', module_ref: 'Data Structures', bloom_depth: 'Analyze', difficulty_avg: 5.0, mastery_score: 0.0, mastery_state: 'locked', order_index: 12 },
+]
 
 // ── Node Colors ───────────────────────────────────────────────────────────────
 const nodeColor: Record<string, string> = {
@@ -74,9 +90,14 @@ export default function KnowledgeGraphPage() {
     const [search, setSearch] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
 
+    const isGuest = !user?.id
+
     useEffect(() => {
         async function loadRoadmaps() {
-            if (!user?.id) return
+            if (!user?.id) {
+                setIsLoading(false)
+                return
+            }
             try {
                 const response = await getUserRoadmaps(user.id)
                 setRoadmaps(response.data || [])
@@ -206,20 +227,44 @@ export default function KnowledgeGraphPage() {
         )
     }
 
-    if (allSubjects.length === 0) {
-        return (
-            <div className="w-full min-h-screen p-6 max-w-7xl mx-auto flex flex-col items-center justify-center z-10 pt-24 text-center">
-                <h2 className="text-2xl font-bold text-white mb-4">No Roadmaps Found</h2>
-                <p className="text-slate-400 mb-6">Upload a syllabus to automatically generate your Knowledge Graph!</p>
-                <Link to="/roadmaps" className="px-6 py-3 rounded-xl bg-indigo-500 hover:bg-indigo-600 font-bold transition-all text-white">
-                    Go to Roadmaps
-                </Link>
-            </div>
-        )
+    // In guest mode or no roadmaps → use demo clusters
+    const effectiveClusters = (isGuest || allSubjects.length === 0) ? DEMO_CLUSTERS : clusters
+    const effectiveWeakClusters = effectiveClusters
+        .filter((c: ConceptCluster) => c.mastery_state === 'in_progress' && c.mastery_score < 0.5)
+        .sort((a: ConceptCluster, b: ConceptCluster) => a.mastery_score - b.mastery_score)
+    const effectiveFiltered = effectiveClusters.filter((c: ConceptCluster) =>
+        c.label.toLowerCase().includes(search.toLowerCase()) ||
+        c.module_ref.toLowerCase().includes(search.toLowerCase())
+    )
+    const effectiveStats = {
+        mastered: effectiveClusters.filter((c: ConceptCluster) => c.mastery_state === 'mastered').length,
+        inProgress: effectiveClusters.filter((c: ConceptCluster) => c.mastery_state === 'in_progress').length,
+        available: effectiveClusters.filter((c: ConceptCluster) => c.mastery_state === 'available').length,
+        total: effectiveClusters.length,
     }
 
     return (
         <div className="w-full min-h-screen p-6 max-w-7xl mx-auto relative z-10 pt-24">
+
+            {/* Guest / demo banner */}
+            {(isGuest || allSubjects.length === 0) && (
+                <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-blue-500/10 border border-indigo-500/20 flex items-center justify-between gap-4 backdrop-blur-sm"
+                >
+                    <div>
+                        <p className="text-sm font-semibold text-indigo-300">📊 Demo Mode — Exploring with sample data</p>
+                        <p className="text-xs text-slate-400 mt-0.5">Sign in and upload a syllabus to see your real knowledge graph</p>
+                    </div>
+                    <Link
+                        to="/signup"
+                        className="shrink-0 px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white text-sm font-bold hover:opacity-90 transition-opacity flex items-center gap-2 shadow-lg shadow-indigo-500/20"
+                    >
+                        <LogIn className="w-4 h-4" /> Sign Up
+                    </Link>
+                </motion.div>
+            )}
 
             {/* ── Top bar ── */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
@@ -252,23 +297,33 @@ export default function KnowledgeGraphPage() {
             </div>
 
             {/* Weak cluster banner */}
-            <WeakTopicBanner weakClusters={weakClusters} onRevisit={handleRevisit} />
+            <WeakTopicBanner weakClusters={effectiveWeakClusters} onRevisit={handleRevisit} />
 
             {/* ── Stats row ── */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
                 {[
-                    { label: 'Mastered', val: stats.mastered, color: 'text-emerald-400', dot: 'bg-emerald-400' },
-                    { label: 'In Progress', val: stats.inProgress, color: 'text-amber-400', dot: 'bg-amber-400' },
-                    { label: 'Available', val: stats.available, color: 'text-blue-400', dot: 'bg-blue-400' },
-                    { label: 'Streak', val: '12 🔥', color: 'text-orange-400', dot: 'bg-orange-400' },
+                    { label: 'Mastered', val: effectiveStats.mastered, color: 'text-emerald-400', dot: 'bg-emerald-400' },
+                    { label: 'In Progress', val: effectiveStats.inProgress, color: 'text-amber-400', dot: 'bg-amber-400' },
+                    { label: 'Available', val: effectiveStats.available, color: 'text-blue-400', dot: 'bg-blue-400' },
+                    { label: 'Total', val: effectiveStats.total, color: 'text-purple-400', dot: 'bg-purple-400' },
                 ].map(s => (
-                    <div key={s.label} className="glass-panel rounded-2xl p-4 border border-white/5">
+                    <motion.div
+                        key={s.label}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{
+                            delay: 0.05 * [
+                                { label: 'Mastered' }, { label: 'In Progress' }, { label: 'Available' }, { label: 'Total' }
+                            ].findIndex(x => x.label === s.label)
+                        }}
+                        className="glass-panel rounded-2xl p-4 border border-white/5 hover:border-white/15 transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/5"
+                    >
                         <div className="flex items-center gap-1.5 mb-1">
                             <div className={`w-2 h-2 rounded-full ${s.dot}`} />
                             <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">{s.label}</span>
                         </div>
                         <p className={`text-2xl font-extrabold ${s.color}`}>{s.val}</p>
-                    </div>
+                    </motion.div>
                 ))}
             </div>
 
@@ -340,15 +395,17 @@ export default function KnowledgeGraphPage() {
                         ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pb-24'
                         : 'flex flex-col gap-2 pb-24'}
                 >
-                    {filtered.map((c: ConceptCluster, i: number) => (
+                    {effectiveFiltered.map((c: ConceptCluster, i: number) => (
                         <motion.button
                             key={c.id}
                             initial={{ opacity: 0, scale: 0.9 }}
                             animate={{ opacity: 1, scale: 1 }}
-                            transition={{ delay: i * 0.04 }}
+                            transition={{ delay: i * 0.03, type: 'spring', stiffness: 300, damping: 25 }}
+                            whileHover={c.mastery_state !== 'locked' ? { scale: 1.03, y: -2 } : undefined}
+                            whileTap={c.mastery_state !== 'locked' ? { scale: 0.97 } : undefined}
                             disabled={c.mastery_state === 'locked'}
                             onClick={() => setSelectedCluster(c)}
-                            className={`relative border rounded-2xl text-left transition-all ${nodeColor[c.mastery_state]} ${viewMode === 'grid' ? 'p-4' : 'p-3 flex items-center gap-4'
+                            className={`relative border rounded-2xl text-left transition-all duration-200 ${nodeColor[c.mastery_state]} ${viewMode === 'grid' ? 'p-4' : 'p-3 flex items-center gap-4'
                                 } ${c.mastery_state !== 'locked' ? 'cursor-pointer' : 'cursor-not-allowed'}`}
                         >
                             {viewMode === 'grid' ? (

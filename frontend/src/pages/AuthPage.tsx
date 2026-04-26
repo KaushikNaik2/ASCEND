@@ -19,6 +19,23 @@ export default function AuthPage({ type }: { type: 'login' | 'signup' }) {
     setError(null)
 
     try {
+      // ── Demo mode when Supabase is not configured ──
+      if (!supabase) {
+        const demoUser = {
+          id: `demo-${Date.now()}`,
+          email: data.email,
+        }
+        setUser(demoUser)
+        setAuthenticated(true)
+
+        if (type === 'signup') {
+          navigate('/onboarding')
+        } else {
+          navigate('/dashboard')
+        }
+        return
+      }
+
       if (type === 'signup') {
         // ─── NEW USER FLOW ───
         const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -117,10 +134,26 @@ export default function AuthPage({ type }: { type: 'login' | 'signup' }) {
 
         <div className="relative z-10 w-full max-w-md mx-auto my-auto py-12">
           {error && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-sm text-center">
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-sm text-center"
+            >
               {error}
-            </div>
+            </motion.div>
           )}
+
+          {/* Demo mode notice when Supabase is not configured */}
+          {!supabase && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs text-center"
+            >
+              🧪 Demo mode — accounts will be local only
+            </motion.div>
+          )}
+
           <AuthForm
             type={type}
             onBack={handleBack}

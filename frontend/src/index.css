@@ -3,22 +3,22 @@
 @theme {
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "Outfit", system-ui, sans-serif;
-  
+
   --color-background: #0f172a;
   --color-foreground: #f8fafc;
-  
+
   --color-primary: #3b82f6;
   --color-primary-foreground: #ffffff;
-  
+
   --color-secondary: #1e293b;
   --color-secondary-foreground: #f1f5f9;
-  
+
   --color-muted: #334155;
   --color-muted-foreground: #94a3b8;
-  
+
   --color-accent: #8b5cf6;
   --color-accent-foreground: #ffffff;
-  
+
   --color-border: #334155;
   --radius-xl: 1rem;
 }
@@ -27,13 +27,37 @@
   :root {
     color-scheme: dark;
   }
-  
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     overflow-x: hidden;
     antialiased: true;
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Custom dark scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(100, 116, 139, 0.35);
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 0.55);
   }
 }
 
@@ -44,5 +68,29 @@
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: -200% center;
+    }
+
+    100% {
+      background-position: 200% center;
+    }
+  }
+
+  .animate-shimmer {
+    background-size: 200% auto;
+    animation: shimmer 3s linear infinite;
   }
 }
