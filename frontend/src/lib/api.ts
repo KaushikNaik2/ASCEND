@@ -6,13 +6,29 @@ const BASE_URL = 'http://localhost:8000';
 
 // ─── Response Types ───────────────────────────────────────────────────────────
 
+export interface MappingEntry {
+    syllabus_text: string;
+    matched_concept: string;
+    confidence: number;
+    module_context: string;
+    concept_cluster_id: string | null;
+}
+
 export interface UploadResponse {
     status: string;
-    source: 'vault' | 'ai_inference';
+    source: 'vault_atomic' | 'scope_detector_atomic' | 'vault' | 'ai_inference';
     filename: string;
-    total_subjects_found?: number;
-    data: SyllabusResponse[];
     golden_syllabus_id: string | null;
+    mapping: {
+        subject_detected?: string;
+        total_topics?: number;
+        unmapped_count?: number;
+        coverage_score?: number;
+        mappings?: MappingEntry[];
+    };
+    // Legacy fields from /upload
+    total_subjects_found?: number;
+    data?: SyllabusResponse[];
 }
 
 export interface RefineRequest {
@@ -77,11 +93,10 @@ async function handleResponse<T>(response: Response): Promise<T> {
     return response.json() as Promise<T>;
 }
 
-// ─── API Functions ────────────────────────────────────────────────────────────
-
 /**
- * POST /syllabus/upload
- * Uploads a PDF syllabus. Uses FormData (multipart/form-data).
+ * POST /syllabus/map (Atomic Shift)
+ * Uploads a PDF and maps topics to the Truth Layer using concept IDs.
+ * Returns NDJSON stream with progress events.
  */
 export async function uploadSyllabus(
     file: File,
@@ -92,10 +107,9 @@ export async function uploadSyllabus(
     formData.append('file', file);
     formData.append('department_code', departmentCode);
 
-    const response = await fetch(`${BASE_URL}/syllabus/upload`, {
+    const response = await fetch(`${BASE_URL}/syllabus/map`, {
         method: 'POST',
         body: formData,
-        // NOTE: Do NOT set Content-Type header — the browser sets it with the correct boundary
     });
 
     if (!response.ok) {
@@ -118,8 +132,6 @@ export async function uploadSyllabus(
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-
-        // Keep the last part in the buffer if it doesn't end with a newline
         buffer = lines.pop() || '';
 
         for (const line of lines) {
@@ -149,7 +161,7 @@ export async function uploadSyllabus(
         }
     }
 
-    if (!result) throw new ApiError(500, 'No result returned from parsing stream.');
+    if (!result) throw new ApiError(500, 'No result returned from mapping stream.');
     return result;
 }
 
@@ -200,6 +212,7 @@ export async function generateQuiz(payload: QuizGenerateRequest): Promise<QuizGe
 export interface UserStatusResponse {
     has_profile: boolean;
     has_roadmap: boolean;
+    has_baseline: boolean;
 }
 
 export interface SaveProfileRequest {
@@ -302,6 +315,41 @@ export async function updateTopicProgress(
     return handleResponse<{ status: string; progress_state: RoadmapProgressState }>(response);
 }
 
+// ─── Leaderboard ──────────────────────────────────────────────────────────────
+
+export interface LeaderboardEntryResponse {
+    rank: number;
+    user_id: string;
+    name: string;
+    institution: string;
+    xp: number;
+    streak_days: number;
+    topics_mastered: number;
+}
+
+/**
+ * GET /users/leaderboard
+ * Fetches ranked leaderboard of users by XP.
+ */
+export async function getLeaderboard(limit: number = 20): Promise<{ status: string; data: LeaderboardEntryResponse[] }> {
+    const response = await fetch(`${BASE_URL}/users/leaderboard?limit=${limit}`);
+    return handleResponse<{ status: string; data: LeaderboardEntryResponse[] }>(response);
+}
+
+export interface TopicVector {
+    proficiency_score: number;
+    is_mastered: boolean;
+}
+
+/**
+ * GET /users/{userId}/vectors
+ * Fetches all proficiency vectors for the Knowledge Graph.
+ */
+export async function getUserVectors(userId: string): Promise<{ status: string; data: Record<string, TopicVector> }> {
+    const response = await fetch(`${BASE_URL}/users/${userId}/vectors`);
+    return handleResponse<{ status: string; data: Record<string, TopicVector> }>(response);
+}
+
 // ─── Adaptive RAG Quiz ────────────────────────────────────────────────────────
 
 import type { QuizQuestion, BloomLevel } from '../types';
@@ -316,11 +364,12 @@ export interface RawQuizQuestion {
     primary_concept: string;
 }
 
-export async function getAdaptiveQuiz(userId: string, planId: string, topicName: string): Promise<{ questions: QuizQuestion[], source: string }> {
+export async function getAdaptiveQuiz(userId: string, planId: string, topicName: string, subjectId: string): Promise<{ questions: QuizQuestion[], source: string }> {
     const params = new URLSearchParams({
         user_id: userId,
         plan_id: planId,
-        topic_name: topicName
+        topic_name: topicName,
+        subject_id: subjectId,
     });
 
     const response = await fetch(`${BASE_URL}/quiz/adaptive?${params.toString()}`);
@@ -329,14 +378,33 @@ export async function getAdaptiveQuiz(userId: string, planId: string, topicName:
     // Transform backend objects into the flat arrays the UI expects
     const transformed: QuizQuestion[] = data.questions.map(q => {
         const optionTexts = q.options.map(opt => opt.option_text);
-        const correctIdx = q.options.findIndex(opt => opt.option_letter === q.correct_option);
+
+        // Robust correct index matching:
+        // 1. Normalize correct_option to uppercase first letter (handles "A", "a", "A.", "A)", etc.)
+        const correctLetter = (q.correct_option || '').trim().charAt(0).toUpperCase();
+
+        // 2. Try matching by option_letter in the options array
+        let correctIdx = q.options.findIndex(opt =>
+            (opt.option_letter || '').trim().charAt(0).toUpperCase() === correctLetter
+        );
+
+        // 3. Fallback: map letter to position (A=0, B=1, C=2, D=3)
+        if (correctIdx === -1 && correctLetter >= 'A' && correctLetter <= 'D') {
+            correctIdx = correctLetter.charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
+        }
+
+        // 4. Final safety — clamp to valid range
+        if (correctIdx < 0 || correctIdx >= optionTexts.length) {
+            correctIdx = 0;
+            console.warn(`[Quiz Transform] Could not resolve correct_option "${q.correct_option}" for question "${q.id}"`);
+        }
 
         return {
             id: q.id,
             cluster_id: q.primary_concept,
             text: q.question_text,
             options: optionTexts,
-            correct_index: correctIdx !== -1 ? correctIdx : 0,
+            correct_index: correctIdx,
             explanation: q.explanation,
             difficulty: q.metadata.difficulty,
             bloom_level: q.metadata.bloom as BloomLevel
@@ -348,6 +416,7 @@ export async function getAdaptiveQuiz(userId: string, planId: string, topicName:
 
 export interface QuizSubmission {
     user_id: string;
+    plan_id: string;
     subject_id: string;
     topic_name: string;
     question_difficulty: number;

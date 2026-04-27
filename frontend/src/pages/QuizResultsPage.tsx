@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Trophy, TrendingUp, Zap, RotateCcw, Map, Check, X } from 'lucide-react'
+import { Trophy, TrendingUp, Zap, RotateCcw, Map as MapIcon, Check, X } from 'lucide-react'
 import type { QuizQuestion } from '../types'
 
 interface LocationState {
@@ -222,7 +222,7 @@ export default function QuizResultsPage() {
                         onClick={() => navigate('/graph')}
                         className="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-bold flex items-center justify-center gap-2 shadow-[0_0_30px_rgba(99,102,241,0.3)] hover:shadow-[0_0_40px_rgba(99,102,241,0.5)] transition-all"
                     >
-                        <Map className="w-4 h-4" /> Back to Graph
+                        <MapIcon className="w-4 h-4" /> Back to Graph
                     </motion.button>
                 </motion.div>
             </div>

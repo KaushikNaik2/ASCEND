@@ -6,7 +6,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 class EmbeddingEngine:
     """
     Singleton service for 3072-dimensional vectors.
-    Uses text-embedding-004 for maximum semantic precision.
+    Uses models/gemini-embedding-2 for maximum semantic precision.
     """
     _instance = None
 

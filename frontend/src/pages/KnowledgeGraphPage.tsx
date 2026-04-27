@@ -6,8 +6,8 @@ import AssessmentDrawer from '../components/ui/AssessmentDrawer'
 import WeakTopicBanner from '../components/ui/WeakTopicBanner'
 import type { ConceptCluster, Track } from '../types'
 import { useStore } from '../store/useStore'
-import { getUserRoadmaps } from '../lib/api'
-import type { UserRoadmap } from '../lib/api'
+import { getUserRoadmaps, getUserProfile, getUserVectors } from '../lib/api'
+import type { UserRoadmap, TopicVector } from '../lib/api'
 
 // ── Demo data for guests ──────────────────────────────────────────────────────
 const DEMO_CLUSTERS: ConceptCluster[] = [
@@ -41,10 +41,27 @@ const nodeDot: Record<string, string> = {
 }
 
 // ── Heatmap ───────────────────────────────────────────────────────────────────
-function KnowledgeHeatmap() {
-    const weeks = Array.from({ length: 15 })
-    const days = Array.from({ length: 7 })
+function KnowledgeHeatmap({ activityDates }: { activityDates: Record<string, number> }) {
     const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+    // Build 15-week grid ending today
+    const today = new Date()
+    const startDate = new Date(today)
+    startDate.setDate(today.getDate() - 104)
+    startDate.setDate(startDate.getDate() - startDate.getDay())
+
+    const weeks: string[][] = []
+    const current = new Date(startDate)
+    while (weeks.length < 15) {
+        const week: string[] = []
+        for (let d = 0; d < 7; d++) {
+            week.push(current.toISOString().split('T')[0])
+            current.setDate(current.getDate() + 1)
+        }
+        weeks.push(week)
+    }
+
+    const maxCount = Math.max(1, ...Object.values(activityDates))
 
     return (
         <div className="glass-panel p-5 rounded-3xl border border-white/10 flex-1">
@@ -57,11 +74,18 @@ function KnowledgeHeatmap() {
                         <div key={d} className="w-3 h-3 text-[8px] text-slate-600 flex items-center">{d}</div>
                     ))}
                 </div>
-                {weeks.map((_, i) => (
+                {weeks.map((week, i) => (
                     <div key={i} className="flex flex-col gap-1.5">
-                        {days.map((_, j) => {
-                            const val = Math.random()
-                            const bg = val > 0.8 ? 'bg-indigo-500' : val > 0.55 ? 'bg-indigo-500/60' : val > 0.3 ? 'bg-indigo-500/30' : 'bg-white/5'
+                        {week.map((dateStr, j) => {
+                            const count = activityDates[dateStr] || 0
+                            const isFuture = new Date(dateStr) > today
+                            let bg = 'bg-white/5'
+                            if (isFuture) {
+                                bg = 'bg-transparent'
+                            } else if (count > 0) {
+                                const intensity = count / maxCount
+                                bg = intensity > 0.7 ? 'bg-indigo-500' : intensity > 0.4 ? 'bg-indigo-500/60' : 'bg-indigo-500/30'
+                            }
                             return (
                                 <motion.div
                                     key={j}
@@ -69,6 +93,7 @@ function KnowledgeHeatmap() {
                                     animate={{ scale: 1 }}
                                     transition={{ delay: (i * 7 + j) * 0.004 }}
                                     className={`w-3 h-3 rounded-[2px] ${bg}`}
+                                    title={isFuture ? '' : `${dateStr}: ${count} activities`}
                                 />
                             )
                         })}
@@ -89,6 +114,9 @@ export default function KnowledgeGraphPage() {
     const [selectedCluster, setSelectedCluster] = useState<ConceptCluster | null>(null)
     const [search, setSearch] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+    const [totalXP, setTotalXP] = useState(0)
+    const [activityDates, setActivityDates] = useState<Record<string, number>>({})
+    const [topicVectors, setTopicVectors] = useState<Record<string, TopicVector>>({})
 
     const isGuest = !user?.id
 
@@ -101,6 +129,17 @@ export default function KnowledgeGraphPage() {
             try {
                 const response = await getUserRoadmaps(user.id)
                 setRoadmaps(response.data || [])
+                // Fetch profile for XP and activity data
+                const profileRes = await getUserProfile(user.id)
+                if (profileRes.data) {
+                    setTotalXP(profileRes.data.xp || 0)
+                    setActivityDates((profileRes.data as any).activity_dates || {})
+                }
+                // Fetch proficiency vectors for mastery state
+                const vectorsRes = await getUserVectors(user.id)
+                if (vectorsRes.data) {
+                    setTopicVectors(vectorsRes.data)
+                }
             } catch (error) {
                 console.error('Failed to load roadmaps:', error)
             } finally {
@@ -155,22 +194,32 @@ export default function KnowledgeGraphPage() {
         return currentSubject.modules.flatMap((mod: any, modIdx: number) =>
             (mod.topics || []).map((topic: any, topicIdx: number) => {
                 const title = topic.title || ''
-                const state = currentSubject.progress_state[title] || 'pending'
 
-                let mastery_state = 'locked'
+                // Use real proficiency vector if available, else fallback to progress_state
+                const vector = topicVectors[title]
+                let mastery_state = 'available'
                 let mastery_score = 0
 
-                if (state === 'done') {
-                    mastery_state = 'mastered'
-                    mastery_score = 1.0
-                } else if (state === 'ongoing') {
-                    mastery_state = 'in_progress'
-                    mastery_score = 0.5
-                } else if (state === 'skipped') {
-                    mastery_state = 'available'
-                    mastery_score = 0.0
+                if (vector) {
+                    // Real quiz data exists
+                    mastery_score = vector.proficiency_score
+                    if (vector.is_mastered || mastery_score >= 0.9) {
+                        mastery_state = 'mastered'
+                    } else if (mastery_score >= 0.1) {
+                        mastery_state = 'in_progress'
+                    } else {
+                        mastery_state = 'available'
+                    }
                 } else {
-                    mastery_state = 'available' // Treat pending as available in the graph
+                    // No quiz data — use roadmap progress_state as hint
+                    const state = currentSubject.progress_state[title] || 'pending'
+                    if (state === 'done') {
+                        mastery_state = 'mastered'
+                        mastery_score = 1.0
+                    } else if (state === 'ongoing') {
+                        mastery_state = 'in_progress'
+                        mastery_score = 0.5
+                    }
                 }
 
                 return {
@@ -186,7 +235,7 @@ export default function KnowledgeGraphPage() {
                 } as ConceptCluster
             })
         )
-    }, [allSubjects, activeTrack])
+    }, [allSubjects, activeTrack, topicVectors])
     const weakClusters = clusters
         .filter((c: ConceptCluster) => c.mastery_state === 'in_progress' && c.mastery_score < 0.5)
         .sort((a: ConceptCluster, b: ConceptCluster) => a.mastery_score - b.mastery_score)
@@ -217,7 +266,6 @@ export default function KnowledgeGraphPage() {
         total: clusters.length,
     }
 
-    const totalXP = 1350
 
     if (isLoading) {
         return (
@@ -347,7 +395,7 @@ export default function KnowledgeGraphPage() {
                     <p className="text-slate-500 text-xs">Learner · {2000 - totalXP} XP to Practitioner</p>
                 </div>
 
-                <KnowledgeHeatmap />
+                <KnowledgeHeatmap activityDates={activityDates} />
             </div>
 
             {/* ── Search + view toggle ── */}

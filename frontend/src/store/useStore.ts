@@ -12,6 +12,7 @@ interface AppState {
   setGoldenSyllabusId: (id: string | null) => void;
   sceneState?: 'upload' | 'processing' | 'results' | 'dashboard';
   setSceneState: (state: 'upload' | 'processing' | 'results' | 'dashboard') => void;
+  logout: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -25,4 +26,5 @@ export const useStore = create<AppState>((set) => ({
   setCurrentSyllabus: (syllabus) => set({ currentSyllabus: syllabus }),
   setGoldenSyllabusId: (id) => set({ goldenSyllabusId: id }),
   setSceneState: (state) => set({ sceneState: state }),
+  logout: () => set({ isAuthenticated: false, user: null, currentSyllabus: null, goldenSyllabusId: null, sceneState: 'dashboard' }),
 }));

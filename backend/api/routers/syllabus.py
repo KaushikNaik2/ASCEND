@@ -3,6 +3,7 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from typing import Any
 import asyncio
 import os
 import json
@@ -36,8 +37,8 @@ class RefinementRequest(BaseModel):
 class ConfirmSyllabusRequest(BaseModel):
     user_id: str
     golden_syllabus_id: str
-    customized_data: list # The final array of modules they approved
-    is_edited: bool       # True if they changed anything from the AI draft
+    customized_data: Any    # dict (atomic mapping) or list (legacy modules)
+    is_edited: bool
 
 # ==========================================
 # 2. ENDPOINTS
@@ -220,14 +221,54 @@ async def refine_module(payload: RefinementRequest):
 async def confirm_syllabus(payload: ConfirmSyllabusRequest):
     """
     HITL Finalization: Saves the user's approved syllabus to their Sandbox.
-    If they had to fix AI errors, it increments the global consensus counter.
+    If atomic mapping data is passed, transforms it into righteous modules/topics format.
     """
     try:
+        save_data = payload.customized_data
+
+        # Detect atomic mapping format and transform to modules/topics
+        if isinstance(save_data, list) and len(save_data) > 0 and isinstance(save_data[0], dict):
+            # Could be raw mapping entries or a single mapping object
+            pass  # Already a list — save as-is
+        elif isinstance(save_data, dict) and save_data.get("mappings"):
+            # Atomic mapping result — transform to RoadmapViewer format
+            mapping_data = save_data
+            grouped: dict[str, list] = {}
+            for m in mapping_data.get("mappings", []):
+                key = m.get("module_context", "Ungrouped")
+                if key not in grouped:
+                    grouped[key] = []
+                grouped[key].append(m)
+
+            modules = []
+            for i, (module_name, entries) in enumerate(grouped.items()):
+                topics = [
+                    {
+                        "title": e.get("matched_concept") if e.get("matched_concept") != "UNMAPPED" else e.get("syllabus_text"),
+                        "syllabus_text": e.get("syllabus_text"),
+                        "concept_cluster_id": e.get("concept_cluster_id"),
+                        "confidence": e.get("confidence", 0),
+                        "is_mapped": e.get("matched_concept") != "UNMAPPED",
+                    }
+                    for e in entries
+                ]
+                modules.append({
+                    "module_number": f"M{i + 1}",
+                    "title": module_name,
+                    "topics": topics,
+                })
+
+            save_data = {
+                "subject_name": mapping_data.get("subject_detected", "My Roadmap"),
+                "semester": mapping_data.get("semester"),
+                "modules": modules,
+            }
+
         # 1. Save to the private User Sandbox
         db.save_user_customized_syllabus(
             user_id=payload.user_id,
             golden_syllabus_id=payload.golden_syllabus_id,
-            customized_data=payload.customized_data
+            customized_data=save_data
         )
         
         # 2. If the user had to manually correct the AI, record that vote.
@@ -253,9 +294,9 @@ async def map_syllabus(
     department_code: str = Form("Unknown")
 ):
     """
-    Mapping Mode: Extracts text from an uploaded PDF, then maps each
-    topic to the pre-existing Truth Layer (concept_clusters) instead
-    of creating new content. The LLM acts as a Scope Detector.
+    Atomic Mapping Mode: Extracts text from an uploaded PDF, then maps each
+    topic to the pre-existing Truth Layer (concept_clusters) using atomic
+    concept IDs. The LLM acts as a Scope Detector — no new content is created.
     """
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Invalid file type. Only PDFs are allowed.")
@@ -275,6 +316,26 @@ async def map_syllabus(
             raise HTTPException(status_code=413, detail="Payload Too Large: File exceeds 5MB limit.")
 
     async def mapping_stream():
+        # --- VAULT CHECK: Skip AI if this PDF was already mapped ---
+        yield json.dumps({"progress": 5, "step": 0, "message": "Checking Secure Vault..."}) + "\n"
+        from services.pdf_service import calculate_file_hash
+        file_hash = calculate_file_hash(file_bytes)
+        
+        cached = db.get_syllabus_by_hash(file_hash)
+        if cached:
+            existing = cached[0] if isinstance(cached, list) and len(cached) > 0 else cached
+            if isinstance(existing, dict) and existing.get("syllabus_data"):
+                yield json.dumps({
+                    "progress": 100, "step": 3, "message": "Vault Match Found!",
+                    "result": {
+                        "status": "success", "source": "vault_atomic",
+                        "filename": file.filename,
+                        "mapping": existing.get("syllabus_data", {}),
+                        "golden_syllabus_id": existing.get("id"),
+                    }
+                }) + "\n"
+                return
+
         # 2. Extract text
         yield json.dumps({"progress": 10, "step": 0, "message": "Extracting text from PDF..."}) + "\n"
         try:
@@ -288,11 +349,13 @@ async def map_syllabus(
         yield json.dumps({"progress": 30, "step": 1, "message": "Loading Truth Layer concepts..."}) + "\n"
         try:
             response = db.client.table("concept_clusters").select(
-                "concept_name, subject, branch, semester, difficulty_tier"
+                "id, concept_name, subject, branch, semester, difficulty_tier"
             ).execute()
             truth_concepts = response.data if hasattr(response, 'data') else []
+            print(f"🔍 Truth Layer query returned {len(truth_concepts)} concepts")
         except Exception as e:
             yield json.dumps({"error": f"Failed to load Truth Layer: {str(e)}"}) + "\n"
+            print(f"❌ Truth Layer query EXCEPTION: {e}")
             return
 
         if not truth_concepts:
@@ -330,16 +393,51 @@ async def map_syllabus(
             yield json.dumps({"error": f"Mapping AI Error: {str(e)}"}) + "\n"
             return
 
-        # 6. Return mapping results
+        # 6. ATOMIC RESOLUTION: Link matched concept names → concept_clusters UUIDs
+        yield json.dumps({"progress": 80, "step": 3, "message": "Resolving atomic concept IDs..."}) + "\n"
+        mapping_dict = mapping_result.model_dump() if mapping_result else {}
+        
+        if mapping_dict.get("mappings"):
+            matched_names = [
+                m["matched_concept"] for m in mapping_dict["mappings"]
+                if m.get("matched_concept") and m["matched_concept"] != "UNMAPPED"
+            ]
+            subject_detected = mapping_dict.get("subject_detected", "")
+            
+            # Build a name→UUID lookup from the already-fetched truth_concepts
+            concept_id_map = {
+                c["concept_name"]: c["id"] for c in truth_concepts
+                if c["concept_name"] in matched_names
+            }
+            
+            # Inject concept_cluster_id into each mapping
+            for m in mapping_dict["mappings"]:
+                m["concept_cluster_id"] = concept_id_map.get(m.get("matched_concept"), None)
+
+        # 7. Cache the mapping result as a draft syllabus
+        golden_id = None
+        try:
+            draft = db.create_draft_syllabus(
+                file_hash=file_hash,
+                syllabus_json=mapping_dict,
+                department_code=department_code,
+            )
+            if hasattr(draft, 'data') and isinstance(draft.data, list) and len(draft.data) > 0:
+                golden_id = draft.data[0].get("id") if isinstance(draft.data[0], dict) else None
+        except Exception as e:
+            print(f"⚠️ Vault Cache Error (non-fatal): {e}")
+
+        # 8. Return mapping results with concept IDs
         yield json.dumps({
             "progress": 100,
-            "step": 3,
-            "message": "Mapping Complete!",
+            "step": 4,
+            "message": "Atomic Mapping Complete!",
             "result": {
                 "status": "success",
-                "source": "scope_detector",
+                "source": "scope_detector_atomic",
                 "filename": file.filename,
-                "mapping": mapping_result.model_dump() if mapping_result else {},
+                "mapping": mapping_dict,
+                "golden_syllabus_id": golden_id,
             }
         }) + "\n"
 

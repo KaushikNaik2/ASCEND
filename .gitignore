@@ -56,4 +56,5 @@ test_results/
 firewall_breach.log
 todo.md
 *.md
-*.sql
+*.sql*
+*logs*

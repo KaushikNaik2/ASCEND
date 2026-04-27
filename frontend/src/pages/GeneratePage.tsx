@@ -38,18 +38,17 @@ export default function GeneratePage() {
         setProgressData(data)
       })
 
-      // Store the first subject as the current syllabus
-      const firstSubject = response.data?.[0] ?? null
-      apiResult.current = { data: response.data, goldenId: response.golden_syllabus_id }
+      // Atomic Shift: response has `mapping` instead of `data`
+      apiResult.current = { data: response.mapping?.mappings || response.data || [], goldenId: response.golden_syllabus_id }
       apiDone.current = true
 
-      if (firstSubject) {
-        setCurrentSyllabus(firstSubject)
+      // Store the mapping as current syllabus context
+      const mappingData = response.mapping || {}
+      if (mappingData) {
+        setCurrentSyllabus(mappingData as any)
         setGoldenSyllabusId(response.golden_syllabus_id)
       }
 
-      // Transition to results (the ProcessingView may still be animating — 
-      // this will override it as soon as the API resolves)
       setStep('results')
       setSceneState('results')
     } catch (err: any) {
@@ -69,24 +68,21 @@ export default function GeneratePage() {
 
     if (goldenId && syllabusData) {
       try {
-        // Send the ENTIRE array of parsed subjects to the backend to generate all roadmaps
-        const customizedData = apiResult.current?.data || [syllabusData]
-
+        // Pass the full mapping object — backend transforms it to modules/topics
         await confirmSyllabus({
           user_id: userId,
           golden_syllabus_id: goldenId,
-          customized_data: customizedData,
+          customized_data: syllabusData,
           is_edited: false,
         })
       } catch (err) {
         console.error('Confirm failed (non-blocking):', err)
-        // Non-blocking — still navigate to roadmap
       }
     }
 
     setIsApproving(false)
     setSceneState('dashboard')
-    navigate('/roadmap/1')
+    navigate('/roadmaps')
   }
 
   // Called when ProcessingView timer finishes (cosmetic timer is done)

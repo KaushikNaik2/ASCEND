@@ -73,7 +73,6 @@ class DatabaseManager:
             return response.data[0] if response.data else {"proficiency_score": 0.1, "is_mastered": False}
         except Exception as e:
             print(f"❌ Proficiency Fetch Error: {e}")
-            print(f"❌ Proficiency Fetch Error: {e}")
             return {"proficiency_score": 0.1, "is_mastered": False}
 
     def get_user_profile(self, user_id: str) -> dict | None:
@@ -88,7 +87,7 @@ class DatabaseManager:
             profile = prof_resp.data[0]
 
             # 2. Fetch topic vectors to calculate XP and Mastery
-            vec_resp = self.client.table("user_topic_vectors").select("is_mastered").eq("user_id", user_id).execute()
+            vec_resp = self.client.table("user_topic_vectors").select("is_mastered, last_updated").eq("user_id", user_id).execute()
             vectors = vec_resp.data or []
             
             topics_attempted = len(vectors)
@@ -100,7 +99,25 @@ class DatabaseManager:
             # Study Hours (approximate: 30 mins per topic attempted)
             study_hours = int(topics_attempted * 0.5)
 
-            # 3. Fetch active roadmaps
+            # 3. Streak Calculation — count consecutive days with activity
+            streak_days = self._calculate_streak(vectors)
+
+            # 3.5 Activity heatmap — count activity per day (last 105 days = 15 weeks)
+            from datetime import datetime, timedelta
+            activity_counts: dict[str, int] = {}
+            cutoff = (datetime.now() - timedelta(days=105)).date()
+            for v in vectors:
+                ts = v.get("last_updated")
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
+                        if dt >= cutoff:
+                            key = dt.isoformat()
+                            activity_counts[key] = activity_counts.get(key, 0) + 1
+                    except (ValueError, AttributeError):
+                        pass
+
+            # 4. Fetch active roadmaps
             plans_resp = self.client.table("user_study_plans").select("id").eq("user_id", user_id).execute()
             active_roadmaps = len(plans_resp.data) if plans_resp.data else 0
 
@@ -109,14 +126,108 @@ class DatabaseManager:
                 "university": profile.get("university", "Unknown University"),
                 "joined_date": profile.get("created_at", "Just now"),
                 "xp": xp,
-                "streak_days": 1, # Future: Calculate from distinct last_updated dates
+                "streak_days": streak_days,
                 "topics_mastered": topics_mastered,
                 "study_hours": study_hours,
-                "active_roadmaps": active_roadmaps
+                "active_roadmaps": active_roadmaps,
+                "activity_dates": activity_counts,
             }
         except Exception as e:
             print(f"❌ Get Profile Stats Error: {e}")
             return None
+
+    def _calculate_streak(self, vectors: list[dict]) -> int:
+        """Count consecutive days of activity ending today (or yesterday)."""
+        from datetime import datetime, timedelta
+        
+        if not vectors:
+            return 0
+        
+        # Extract unique activity dates
+        activity_dates = set()
+        for v in vectors:
+            ts = v.get("last_updated")
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    activity_dates.add(dt.date())
+                except (ValueError, AttributeError):
+                    pass
+        
+        if not activity_dates:
+            return 0
+        
+        today = datetime.now().date()
+        
+        # Start counting from today or yesterday
+        if today in activity_dates:
+            current = today
+        elif (today - timedelta(days=1)) in activity_dates:
+            current = today - timedelta(days=1)
+        else:
+            return 0
+        
+        streak = 0
+        while current in activity_dates:
+            streak += 1
+            current -= timedelta(days=1)
+        
+        return streak
+
+    def get_leaderboard(self, limit: int = 20) -> list[dict]:
+        """
+        Compute leaderboard by aggregating XP across all users.
+        Returns ranked list of users with their stats.
+        """
+        try:
+            # Fetch all user_topic_vectors
+            vec_resp = self.client.table("user_topic_vectors") \
+                .select("user_id, is_mastered, last_updated") \
+                .execute()
+            vectors = vec_resp.data or []
+            
+            # Group by user_id
+            user_stats: dict[str, dict] = {}
+            for v in vectors:
+                uid = v["user_id"]
+                if uid not in user_stats:
+                    user_stats[uid] = {"attempted": 0, "mastered": 0, "vectors": []}
+                user_stats[uid]["attempted"] += 1
+                if v.get("is_mastered"):
+                    user_stats[uid]["mastered"] += 1
+                user_stats[uid]["vectors"].append(v)
+            
+            # Fetch all profiles for names
+            prof_resp = self.client.table("user_profiles").select("user_id, full_name, university").execute()
+            profiles = {p["user_id"]: p for p in (prof_resp.data or [])}
+            
+            # Build leaderboard entries
+            entries = []
+            for uid, stats in user_stats.items():
+                xp = (stats["attempted"] * 20) + (stats["mastered"] * 50)
+                streak = self._calculate_streak(stats["vectors"])
+                profile = profiles.get(uid, {})
+                
+                entries.append({
+                    "user_id": uid,
+                    "name": profile.get("full_name", f"User-{uid[:6]}"),
+                    "institution": profile.get("university", "Mumbai University"),
+                    "xp": xp,
+                    "streak_days": streak,
+                    "topics_mastered": stats["mastered"],
+                })
+            
+            # Sort by XP descending
+            entries.sort(key=lambda e: e["xp"], reverse=True)
+            
+            # Assign ranks
+            for i, entry in enumerate(entries[:limit]):
+                entry["rank"] = i + 1
+            
+            return entries[:limit]
+        except Exception as e:
+            print(f"❌ Leaderboard Error: {e}")
+            return []
 
     def get_plan_details(self, plan_id: str) -> dict | None:
         try:
@@ -127,6 +238,34 @@ class DatabaseManager:
         except Exception as e:
             print(f"❌ Plan Fetch Error: {e}")
             return None
+
+    def get_plan_mapped_concepts(self, plan_id: str) -> list[str]:
+        """Extracts matched_concept names from a user's confirmed study plan.
+        Returns only non-UNMAPPED concepts the student actually has to study."""
+        try:
+            response = self.client.table("user_study_plans") \
+                .select("customized_syllabus") \
+                .eq("id", plan_id) \
+                .execute()
+            if not response.data or len(response.data) == 0:
+                return []
+            
+            syllabus = response.data[0].get("customized_syllabus")
+            if not syllabus:
+                return []
+            
+            # Handle both list-of-mappings and dict-with-mappings formats
+            mappings = syllabus if isinstance(syllabus, list) else syllabus.get("mappings", [])
+            
+            return [
+                m["matched_concept"] for m in mappings
+                if isinstance(m, dict) 
+                and m.get("matched_concept") 
+                and m["matched_concept"] != "UNMAPPED"
+            ]
+        except Exception as e:
+            print(f"❌ Plan Concepts Fetch Error: {e}")
+            return []
 
     def update_user_proficiency(self, user_id: str, subject_id: str, topic_name: str, new_score: float, is_mastered: bool):
         try:
@@ -243,5 +382,65 @@ class DatabaseManager:
         except Exception as e:
             print(f"❌ Update Topic Status Error: {e}")
             raise e
+
+    # --- ATOMIC SHIFT OPERATIONS ---
+
+    def resolve_concept_ids(self, concept_names: list[str], subject: str) -> dict[str, str]:
+        """Maps concept names to concept_clusters UUIDs from the Truth Layer."""
+        try:
+            response = self.client.table("concept_clusters") \
+                .select("id, concept_name") \
+                .eq("subject", subject) \
+                .in_("concept_name", concept_names) \
+                .execute()
+            return {r["concept_name"]: r["id"] for r in (response.data or [])}
+        except Exception as e:
+            print(f"❌ Concept Resolution Error: {e}")
+            return {}
+
+    def save_atomic_roadmap(self, user_id: str, golden_syllabus_id: str,
+                            mapped_concepts: list[dict]) -> dict:
+        """Saves a roadmap built from atomic concept IDs with initial progress."""
+        progress_state = {
+            c["matched_concept"]: "pending"
+            for c in mapped_concepts
+            if c.get("matched_concept") and c["matched_concept"] != "UNMAPPED"
+        }
+        payload = {
+            "user_id": user_id,
+            "golden_syllabus_id": golden_syllabus_id,
+            "customized_syllabus": mapped_concepts,
+            "progress_state": progress_state,
+        }
+        try:
+            return self.client.table("user_study_plans").upsert(payload).execute()
+        except Exception as e:
+            print(f"❌ Atomic Roadmap Save Error: {e}")
+            raise e
+
+    # --- BASELINE ASSESSMENT OPERATIONS ---
+
+    def mark_baseline_complete(self, user_id: str, subject_id: str):
+        """Records that a user has completed baseline assessment for a subject."""
+        try:
+            self.client.table("user_baselines").upsert({
+                "user_id": user_id,
+                "subject_id": subject_id,
+                "completed_at": "now()",
+            }).execute()
+        except Exception as e:
+            print(f"❌ Baseline Mark Error: {e}")
+
+    def has_baseline(self, user_id: str) -> bool:
+        """Check if user has completed any baseline assessment."""
+        try:
+            resp = self.client.table("user_baselines") \
+                .select("id") \
+                .eq("user_id", user_id) \
+                .limit(1) \
+                .execute()
+            return len(resp.data) > 0 if resp.data else False
+        except Exception:
+            return False
 
 db = DatabaseManager()

@@ -5,7 +5,7 @@ import type { ConceptCluster } from '../../types'
 interface Props {
     cluster: ConceptCluster | null
     onClose: () => void
-    onStartQuiz: (clusterId: string) => void
+    onStartQuiz: (clusterId: string, topicName: string, planId: string) => void
 }
 
 const masteryColor: Record<string, string> = {
@@ -132,7 +132,7 @@ export default function AssessmentDrawer({ cluster, onClose, onStartQuiz }: Prop
                                 whileHover={{ scale: 1.03 }}
                                 whileTap={{ scale: 0.97 }}
                                 disabled={cluster.mastery_state === 'locked'}
-                                onClick={() => onStartQuiz(cluster.id)}
+                                onClick={() => onStartQuiz(cluster.id, cluster.label, (cluster as any).plan_id || '')}
                                 className="w-full py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-bold text-base flex items-center justify-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed shadow-[0_0_30px_rgba(99,102,241,0.3)] hover:shadow-[0_0_40px_rgba(99,102,241,0.5)] transition-all"
                             >
                                 <Play className="w-5 h-5" fill="currentColor" /> Start Quiz

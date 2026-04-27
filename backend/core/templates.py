@@ -148,8 +148,41 @@ def get_syllabus_mapping_prompt() -> PromptTemplate:
         2. ONE-TO-ONE PREFERRED: Each syllabus topic should map to at most one Truth Layer concept.
         3. PRESERVE CONTEXT: Include the module name/number for each mapped topic.
         4. COVERAGE: Report total topics found and how many were successfully mapped.
+        5. SUBJECT NAME: For subject_detected, return the full human-readable name (e.g., "Data Structures & Algorithms"), NOT course codes like "CS301" or "BTCOC402".
         
         Generate the structured mapping now.
         """,
         input_variables=["known_concepts", "text"],
+    )
+
+
+def get_concept_extraction_prompt() -> PromptTemplate:
+    """
+    Returns the prompt that converts syllabus module data into atomic
+    concept entries suitable for the concept_clusters Truth Layer.
+    """
+    return PromptTemplate(
+        template="""You are a curriculum decomposition engine for Mumbai University Engineering.
+
+TASK: Break down the following syllabus subject into atomic, testable concepts.
+
+SUBJECT DATA (JSON):
+{subject_json}
+
+RULES:
+1. GRANULARITY: Each concept must be a single, testable idea (e.g., "Binary Search Tree" not "Trees and their types").
+2. HIERARCHY: Identify parent-child relationships. A parent concept is one that MUST be understood before the child. Set parent_concept_name to the parent's exact concept_name string, or null if it's a root concept.
+3. DIFFICULTY TIERS:
+   - "foundational": Definitions, basic properties, introductory topics (Bloom's: Remember/Understand)
+   - "intermediate": Applications, standard algorithms, derivations (Bloom's: Apply/Analyze)
+   - "advanced": Proofs, optimizations, cross-topic synthesis (Bloom's: Evaluate/Create)
+4. MODULE NUMBERS: Use integer module numbers (1, 2, 3...) even if the source uses Roman numerals.
+5. COVERAGE: Extract ALL concepts from ALL modules. Do not skip any module.
+6. COUNT: Aim for 3-8 concepts per module depending on the module's depth.
+7. NAMING: Use clean, concise concept names. No course codes. No "Introduction to X" unless it's genuinely a distinct introductory topic.
+8. ZERO HALLUCINATION: Only extract concepts that are explicitly or clearly implied in the syllabus text. Do not add external knowledge.
+
+Generate the structured concept list now.
+""",
+        input_variables=["subject_json"],
     )

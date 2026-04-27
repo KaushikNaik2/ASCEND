@@ -5,6 +5,7 @@ import { Clock, ChevronRight, Check, X, CircleAlert, Sparkles, Loader2 } from 'l
 import type { QuizQuestion } from '../types'
 import { useStore } from '../store/useStore'
 import { getAdaptiveQuiz, submitQuizAnswer } from '../lib/api'
+import MathText from '../components/ui/MathText'
 
 const TOTAL_TIME = 45 // seconds per question
 
@@ -15,6 +16,7 @@ export default function QuizSessionPage() {
 
     const topic = searchParams.get('topic') || ''
     const planId = searchParams.get('plan_id') || ''
+    const subjectId = searchParams.get('subject_id') || ''
 
     const [questions, setQuestions] = useState<QuizQuestion[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -44,7 +46,7 @@ export default function QuizSessionPage() {
             const loaderTimeout = setTimeout(() => setIsGenerating(true), 1500)
 
             try {
-                const response = await getAdaptiveQuiz(user.id, planId, topic)
+                const response = await getAdaptiveQuiz(user.id, planId, topic, subjectId)
                 setQuestions(response.questions)
                 setSource(response.source)
                 setAnswers(Array(response.questions.length).fill(null))
@@ -94,7 +96,8 @@ export default function QuizSessionPage() {
             if (user?.id && planId && topic && question) {
                 await submitQuizAnswer({
                     user_id: user.id,
-                    subject_id: planId,
+                    plan_id: planId,
+                    subject_id: subjectId,
                     topic_name: topic,
                     question_difficulty: question.difficulty,
                     is_correct: optIdx === question.correct_index
@@ -241,7 +244,7 @@ export default function QuizSessionPage() {
                         initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
                         className="glass-panel p-6 md:p-8 rounded-3xl border border-white/10 mb-5"
                     >
-                        <p className="text-white text-lg md:text-xl font-semibold leading-relaxed">{question.text}</p>
+                        <MathText text={question.text} className="text-white text-lg md:text-xl font-semibold leading-relaxed" />
                     </motion.div>
                 </AnimatePresence>
 
@@ -260,7 +263,7 @@ export default function QuizSessionPage() {
                                 <span className="w-6 h-6 rounded-full border flex items-center justify-center flex-shrink-0 text-xs font-bold border-current">
                                     {String.fromCharCode(65 + i)}
                                 </span>
-                                <span className="flex-1">{opt}</span>
+                                <span className="flex-1"><MathText text={opt} /></span>
                                 {showFeedback && i === question.correct_index && (
                                     <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                                 )}
@@ -290,7 +293,7 @@ export default function QuizSessionPage() {
                                 <p className={`text-sm font-bold mb-1 ${isCorrect ? 'text-emerald-300' : 'text-red-300'}`}>
                                     {isCorrect ? 'Correct!' : 'Not quite.'}
                                 </p>
-                                <p className="text-slate-400 text-sm leading-relaxed">{question.explanation}</p>
+                                <MathText text={question.explanation} className="text-slate-400 text-sm leading-relaxed" />
                             </div>
                         </motion.div>
                     )}

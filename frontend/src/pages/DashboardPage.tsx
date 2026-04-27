@@ -76,9 +76,34 @@ function StreakCalendar({ streakDays }: { streakDays: number }) {
 
 function calculateProgress(roadmap: UserRoadmap): number {
   const state = roadmap.progress_state || {};
-  const total = Object.keys(state).length || 1; // avoid division by zero
+  const total = Object.keys(state).length || 1;
   const done = Object.values(state).filter(status => status === 'done').length;
   return Math.round((done / total) * 100);
+}
+
+// Safe label extractor: handles both dict {subject_name, modules[]} and legacy array
+function getSyllabusLabel(syllabus: any): string {
+  if (!syllabus) return 'Study Plan';
+  if (typeof syllabus === 'string') {
+    try { syllabus = JSON.parse(syllabus); } catch { return 'Study Plan'; }
+  }
+  // New atomic format: { subject_name, modules[] }
+  if (syllabus.subject_name) return syllabus.subject_name;
+  // Legacy array format: [{title, modules}]
+  if (Array.isArray(syllabus) && syllabus[0]?.title) return syllabus[0].title;
+  if (Array.isArray(syllabus) && syllabus[0]?.subject_name) return syllabus[0].subject_name;
+  return 'Study Plan';
+}
+
+// Safe modules extractor for Top Clusters
+function getSyllabusModules(syllabus: any): any[] {
+  if (!syllabus) return [];
+  if (typeof syllabus === 'string') {
+    try { syllabus = JSON.parse(syllabus); } catch { return []; }
+  }
+  if (syllabus.modules) return syllabus.modules;
+  if (Array.isArray(syllabus)) return syllabus;
+  return [];
 }
 
 export default function DashboardPage() {
@@ -167,7 +192,7 @@ export default function DashboardPage() {
                 <div className="relative z-10 flex flex-col md:flex-row gap-6 md:items-center justify-between">
                   <div>
                     <span className="inline-block px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold mb-3 border border-indigo-500/30">
-                      {(topRoadmap.customized_syllabus as any)[0]?.title || 'Syllabus'}
+                      {getSyllabusLabel(topRoadmap.customized_syllabus)}
                     </span>
                     <h3 className="text-2xl font-bold text-white mb-2">Continue from where you left off</h3>
                     <p className="text-slate-400 text-sm mb-4">Jump back into your active roadmap modules.</p>
@@ -200,7 +225,7 @@ export default function DashboardPage() {
                   <Link to={`/roadmap/${rm.id}`} key={rm.id} className="glass-panel p-5 rounded-2xl border border-white/5 hover:bg-white/5 hover:border-white/10 transition-all flex items-center gap-4 group">
                     <CircularProgress progress={rm.progress} />
                     <div className="flex-1 overflow-hidden">
-                      <h4 className="font-bold text-slate-200 group-hover:text-white transition-colors truncate">{(rm.customized_syllabus as any)[0]?.title || 'Study Plan'}</h4>
+                      <h4 className="font-bold text-slate-200 group-hover:text-white transition-colors truncate">{getSyllabusLabel(rm.customized_syllabus)}</h4>
                       <p className="text-xs text-slate-500 mt-1">
                         {new Date(rm.created_at).toLocaleDateString()}
                       </p>
@@ -221,16 +246,16 @@ export default function DashboardPage() {
           <div className="glass-panel p-6 rounded-3xl border border-white/5">
             <h3 className="text-lg font-bold text-white mb-4 border-b border-white/5 pb-2">Top Clusters</h3>
             <div className="space-y-4">
-              {((topRoadmap?.customized_syllabus as any[]) || []).map((subject: any, i: number) => (
-                <Link to={`/roadmap/${topRoadmap.id}`} key={i} className="flex items-center justify-between group p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all cursor-pointer">
+              {getSyllabusModules(topRoadmap?.customized_syllabus).slice(0, 4).map((mod: any, i: number) => (
+                <Link to={`/roadmap/${topRoadmap!.id}`} key={i} className="flex items-center justify-between group p-3 rounded-xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all cursor-pointer">
                   <div className="flex flex-col">
-                    <span className="font-semibold text-sm group-hover:text-indigo-300 transition-colors line-clamp-1">{subject.title}</span>
-                    <span className="text-xs text-slate-500 mt-1 flex items-center gap-1"><BookOpen className="w-3 h-3" /> {subject.modules?.length || 0} Modules</span>
+                    <span className="font-semibold text-sm group-hover:text-indigo-300 transition-colors line-clamp-1">{mod.title || mod.subject_name || `Module ${i + 1}`}</span>
+                    <span className="text-xs text-slate-500 mt-1 flex items-center gap-1"><BookOpen className="w-3 h-3" /> {mod.topics?.length || 0} Topics</span>
                   </div>
                   <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-indigo-400 transition-colors" />
                 </Link>
-              )).slice(0, 4)}
-              {!((topRoadmap?.customized_syllabus as any[])?.length > 0) && (
+              ))}
+              {getSyllabusModules(topRoadmap?.customized_syllabus).length === 0 && (
                 <p className="text-sm text-slate-500">Explore modules to see recommendations.</p>
               )}
             </div>

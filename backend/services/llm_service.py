@@ -1,18 +1,92 @@
 # backend/services/llm_service.py
 
-import os,json
+import os, json, time
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 from langchain_google_genai import ChatGoogleGenerativeAI
 from schemas.syllabus import SyllabusResponse
 from schemas.quiz import PrerequisiteResponse, AdaptiveQuizResponse
-from core.templates import get_syllabus_extraction_prompt, get_prerequisite_inference_prompt,  get_adaptive_quiz_prompt
+from schemas.concept import ConceptExtractionResponse
+from core.templates import (
+    get_syllabus_extraction_prompt,
+    get_prerequisite_inference_prompt,
+    get_adaptive_quiz_prompt,
+    get_concept_extraction_prompt,
+)
+
+
+# ==========================================
+# 0. API Key Rotation Manager
+# ==========================================
+
+class APIKeyManager:
+    """Round-robin key rotator with cooldown failover for Gemini RPM limits."""
+
+    def __init__(self, keys: list[str] | None = None):
+        if keys:
+            self.keys = [k for k in keys if k]
+        else:
+            # Auto-discover from env: GOOGLE_API_KEY_A, _B, _C, fallback to GOOGLE_API_KEY
+            self.keys = [
+                v for v in [
+                    os.getenv("GOOGLE_API_KEY_A"),
+                    os.getenv("GOOGLE_API_KEY_B"),
+                    os.getenv("GOOGLE_API_KEY_C"),
+                ] if v
+            ]
+            if not self.keys:
+                fallback = os.getenv("GOOGLE_API_KEY")
+                if fallback:
+                    self.keys = [fallback]
+        if not self.keys:
+            raise ValueError("No API keys found. Set GOOGLE_API_KEY_A/B/C or GOOGLE_API_KEY in .env")
+        self.index = 0
+        self._cooling: dict[str, float] = {}  # key -> cooldown_until timestamp
+
+    def get_next_key(self) -> str:
+        """Returns the next available key, skipping any in cooldown."""
+        for _ in range(len(self.keys)):
+            key = self.keys[self.index]
+            self.index = (self.index + 1) % len(self.keys)
+            if key not in self._cooling or time.time() > self._cooling[key]:
+                self._cooling.pop(key, None)
+                return key
+        # All keys cooling — wait shortest remaining cooldown
+        min_wait = min(self._cooling.values()) - time.time()
+        wait_secs = max(1, int(min_wait) + 1)
+        print(f"⏳ All keys cooling. Waiting {wait_secs}s...")
+        time.sleep(wait_secs)
+        self._cooling.clear()
+        return self.keys[0]
+
+    def mark_cooling(self, key: str, duration: int = 60):
+        """Mark a key as rate-limited for `duration` seconds."""
+        self._cooling[key] = time.time() + duration
+        masked = key[:8] + "..." + key[-4:]
+        print(f"🧊 Key {masked} cooling for {duration}s")
+
+    @property
+    def count(self) -> int:
+        return len(self.keys)
+
+
+# Global singleton (lazy — only created when needed)
+_key_manager: APIKeyManager | None = None
+
+def get_key_manager() -> APIKeyManager:
+    global _key_manager
+    if _key_manager is None:
+        _key_manager = APIKeyManager()
+    return _key_manager
+
 
 # ==========================================
 # 1. Extraction Pipeline (Raw PDF -> JSON)
 # ==========================================
 
-def get_syllabus_chain():
+def get_syllabus_chain(api_key: str | None = None):
     """Initializes the Gemini extraction chain."""
-    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise ValueError("GOOGLE_API_KEY environment variable is missing.")
 
@@ -28,8 +102,9 @@ def get_syllabus_chain():
 
     return syllabus_prompt | structured_llm
 
-async def generate_syllabus_json(clean_text: str):
-    chain = get_syllabus_chain()
+@retry(wait=wait_exponential(min=2, max=30), stop=stop_after_attempt(3), retry=retry_if_exception_type(Exception))
+async def generate_syllabus_json(clean_text: str, api_key: str | None = None):
+    chain = get_syllabus_chain(api_key)
     return await chain.ainvoke({"text": clean_text})
 
 # Add this inside backend/services/llm_service.py, right after generate_syllabus_json
@@ -69,6 +144,7 @@ def merge_syllabus_chunks(chunk_responses: list[dict]) -> list[dict]:
                     merged_subjects[subject_name]["modules"].append(mod)
 
     return list(merged_subjects.values())
+
 # ==========================================
 # 2. Inference Pipeline (Verified JSON -> Prerequisites)
 # ==========================================
@@ -101,6 +177,7 @@ def get_prerequisite_chain():
 
     return prereq_prompt | structured_llm
 
+@retry(wait=wait_exponential(min=2, max=30), stop=stop_after_attempt(3), retry=retry_if_exception_type(Exception))
 async def generate_prerequisites(parsed_syllabus: SyllabusResponse) -> PrerequisiteResponse:
     chain = get_prerequisite_chain()
     efficient_md = _format_syllabus_to_md(parsed_syllabus)
@@ -127,6 +204,7 @@ def get_adaptive_quiz_chain():
 
     return quiz_prompt | structured_llm
 
+@retry(wait=wait_exponential(min=2, max=30), stop=stop_after_attempt(3), retry=retry_if_exception_type(Exception))
 async def generate_adaptive_quiz(
     user_proficiency_map: dict, 
     target_topics_md: str, 
@@ -165,3 +243,33 @@ async def generate_adaptive_quiz(
     })
     
     return response
+
+
+# ==========================================
+# 4. Concept Extraction Pipeline (Syllabus JSON -> Atomic Concepts)
+# ==========================================
+
+def get_concept_extraction_chain(api_key: str | None = None):
+    """Initializes the LLM chain to decompose syllabus subjects into atomic concepts."""
+    if not api_key:
+        api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise ValueError("API key required for concept extraction.")
+
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.1-flash-lite-preview",
+        temperature=0.1,
+        api_key=api_key,
+    )
+
+    structured_llm = llm.with_structured_output(ConceptExtractionResponse)
+    concept_prompt = get_concept_extraction_prompt()
+
+    return concept_prompt | structured_llm
+
+
+@retry(wait=wait_exponential(min=2, max=30), stop=stop_after_attempt(3), retry=retry_if_exception_type(Exception))
+async def generate_concepts(subject_json: str, api_key: str | None = None) -> ConceptExtractionResponse:
+    """Extract atomic concepts from a single subject's syllabus JSON."""
+    chain = get_concept_extraction_chain(api_key)
+    return await chain.ainvoke({"subject_json": subject_json})

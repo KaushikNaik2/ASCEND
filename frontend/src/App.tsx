@@ -53,12 +53,15 @@ function App() {
   return (
     <div className="relative w-screen min-h-screen bg-slate-950 text-slate-50 font-sans overflow-x-hidden">
       <CustomCursor />
-      {/* 3D Background Layer — wrapped in error boundary so a WebGL crash doesn't kill the app */}
-      <CanvasErrorBoundary fallback={<BackgroundFallback />}>
-        <Suspense fallback={<BackgroundFallback />}>
-          <ThreeBackground appState={currentSceneState as any} />
-        </Suspense>
-      </CanvasErrorBoundary>
+      {/* 3D Background Layer — hidden on /roadmap/* and /graph to prevent WebGL conflicts with React Flow */}
+      {!location.pathname.startsWith('/roadmap/') && location.pathname !== '/graph' && (
+        <CanvasErrorBoundary fallback={<BackgroundFallback />}>
+          <Suspense fallback={<BackgroundFallback />}>
+            <ThreeBackground appState={currentSceneState as any} />
+          </Suspense>
+        </CanvasErrorBoundary>
+      )}
+      {(location.pathname.startsWith('/roadmap/') || location.pathname === '/graph') && <BackgroundFallback />}
 
       {/* UI Overlay Layer */}
       <div className="relative z-10 w-full min-h-screen flex flex-col pointer-events-none">

@@ -1,5 +1,5 @@
 create or replace function match_quiz_questions (
-  query_embedding vector(768),
+  query_embedding vector(3072),
   match_threshold float,
   match_count int,
   target_difficulty float,
